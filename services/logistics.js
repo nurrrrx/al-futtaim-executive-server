@@ -78,6 +78,12 @@ router.get('/grid', (req, res) => {
   res.json(slimGrid);
 });
 
+// GET /api/logistics/grid/full — complete grid with all car data (for client-side indexing)
+// ~3.7MB uncompressed, ~350KB with gzip
+router.get('/grid/full', (req, res) => {
+  res.json(fullData);
+});
+
 // GET /api/logistics/config — grid configuration
 router.get('/config', (req, res) => {
   res.json(gridConfig);

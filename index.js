@@ -1,11 +1,13 @@
 const express = require('express');
 const cors = require('cors');
+const compression = require('compression');
 const swaggerUi = require('swagger-ui-express');
 const swaggerDoc = require('./swagger.json');
 const app = express();
 const PORT = process.env.PORT || 3001;
 
 app.use(cors());
+app.use(compression()); // gzip — 3.7MB → ~350KB over the wire
 app.use(express.json());
 
 // ── Swagger API docs ────────────────────────────────────────────
