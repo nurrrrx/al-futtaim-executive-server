@@ -1,0 +1,42 @@
+{
+  "grid": {
+    "headerGap": "12px",
+    "rowHeaderGap": "8px",
+    "wrapperPadding": "4px 8px 4px 4px"
+  },
+  "header": {
+    "fontSize": "9px",
+    "fontWeight": 500,
+    "color": "#333",
+    "background": "#e0e0e0",
+    "border": "none",
+    "colPadding": "2px 0",
+    "rowPadding": "1px 3px"
+  },
+  "bayLabel": {
+    "fontSize": "clamp(6px, 1.5vw, 20px)"
+  },
+  "spotLabel": {
+    "fontSize": "1.2px"
+  },
+  "parkingSpot": {
+    "border": "0.5px solid"
+  },
+  "car": {
+    "width": "calc(100% - 1px)",
+    "height": "calc(100% - 1px)",
+    "borderRadius": "0.5px"
+  },
+  "exitLabel": {
+    "gap": "2px",
+    "letterSpacing": "1px"
+  },
+  "emptyCell": {
+    "background": "#fff"
+  },
+  "boundary": {
+    "color": "#cc0000",
+    "strokeWidth": 2,
+    "padding": 2
+  }
+}
