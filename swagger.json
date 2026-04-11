@@ -1,0 +1,117 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "Al-Futtaim Executive Server API",
+    "description": "Backend API for the Al-Futtaim Executive BI application. Currently serves the Logistics / Kizad Yard Management module.",
+    "version": "1.0.0"
+  },
+  "servers": [
+    { "url": "https://al-futtaim-executive-server-production.up.railway.app", "description": "Production (Railway)" },
+    { "url": "http://localhost:3001", "description": "Local development" }
+  ],
+  "paths": {
+    "/api/health": {
+      "get": {
+        "tags": ["System"],
+        "summary": "Health check",
+        "responses": {
+          "200": {
+            "description": "Server status",
+            "content": { "application/json": { "example": { "status": "ok", "services": ["logistics"], "timestamp": "2026-04-11T10:00:00.000Z" } } }
+          }
+        }
+      }
+    },
+    "/api/logistics/grid": {
+      "get": {
+        "tags": ["Logistics - Kizad Yard"],
+        "summary": "Get slim yard grid for initial render",
+        "description": "Returns the full yard structure with cell data reduced to brand + model only (no VIN, trim, color, year, driver, arrived). Used for rendering the grid with brand-colored spots. ~900KB response.",
+        "responses": {
+          "200": {
+            "description": "Yard grid data",
+            "content": { "application/json": { "example": { "yard": { "columns": ["A","B","C","D","E","F","G"], "rows": [1,2,3] }, "bays": { "parkingRows": 4, "parkingCols": 52 }, "brandColors": { "Toyota": "#CC2125", "Lexus": "#C5A258" }, "cells": { "A4": [["doesnt_exist", {"brand":"Toyota","model":"Camry"}]] } } } }
+          }
+        }
+      }
+    },
+    "/api/logistics/config": {
+      "get": {
+        "tags": ["Logistics - Kizad Yard"],
+        "summary": "Get grid visual configuration",
+        "description": "Returns styling parameters: header sizes, spot borders, car dimensions, boundary polygon config.",
+        "responses": {
+          "200": { "description": "Grid configuration JSON" }
+        }
+      }
+    },
+    "/api/logistics/spot/{bay}/{row}/{col}": {
+      "get": {
+        "tags": ["Logistics - Kizad Yard"],
+        "summary": "Get full car details for a specific parking spot",
+        "description": "Returns complete vehicle information including VIN, trim, color, year, arrival date, and driver.",
+        "parameters": [
+          { "name": "bay", "in": "path", "required": true, "schema": { "type": "string" }, "example": "B6", "description": "Bay identifier (e.g. A4, B6, G21)" },
+          { "name": "row", "in": "path", "required": true, "schema": { "type": "integer" }, "example": 2, "description": "Parking row within the bay (0-3)" },
+          { "name": "col", "in": "path", "required": true, "schema": { "type": "integer" }, "example": 14, "description": "Parking column within the bay (0-51)" }
+        ],
+        "responses": {
+          "200": {
+            "description": "Car details",
+            "content": { "application/json": { "example": { "brand": "Toyota", "model": "Land Cruiser", "trim": "VXR", "color": "Pearl White", "year": 2025, "vin": "JTM18WT965MSBB8MC", "arrived": "2026-01-25", "driver": "Ahmed K.", "location": { "bay": "B6", "row": 2, "col": 14 } } } }
+          },
+          "404": { "description": "Spot not found or empty" }
+        }
+      }
+    },
+    "/api/logistics/search": {
+      "get": {
+        "tags": ["Logistics - Kizad Yard"],
+        "summary": "Search cars by selection filters",
+        "description": "Filter vehicles by any combination of brand, model, trim, year, and color. Returns matching spot positions.",
+        "parameters": [
+          { "name": "brand", "in": "query", "schema": { "type": "string" }, "example": "Toyota" },
+          { "name": "model", "in": "query", "schema": { "type": "string" }, "example": "Camry" },
+          { "name": "trim", "in": "query", "schema": { "type": "string" }, "example": "XLE" },
+          { "name": "year", "in": "query", "schema": { "type": "string" }, "example": "2025" },
+          { "name": "color", "in": "query", "schema": { "type": "string" }, "example": "White" }
+        ],
+        "responses": {
+          "200": {
+            "description": "Matching spots",
+            "content": { "application/json": { "example": { "count": 42, "spots": [{ "bay": "A4", "row": 2, "col": 34 }, { "bay": "A4", "row": 2, "col": 35 }] } } }
+          }
+        }
+      }
+    },
+    "/api/logistics/search/vin": {
+      "get": {
+        "tags": ["Logistics - Kizad Yard"],
+        "summary": "Search cars by VIN",
+        "description": "Partial VIN search (minimum 3 characters). Returns matching spots with brand, model, and VIN.",
+        "parameters": [
+          { "name": "q", "in": "query", "required": true, "schema": { "type": "string" }, "example": "JTM18", "description": "VIN search query (min 3 chars)" }
+        ],
+        "responses": {
+          "200": {
+            "description": "Matching spots with VIN",
+            "content": { "application/json": { "example": { "count": 3, "spots": [{ "bay": "A8", "row": 2, "col": 10, "brand": "Toyota", "model": "Camry", "vin": "JTM18AG2JHLW3YNEF" }] } } }
+          }
+        }
+      }
+    },
+    "/api/logistics/filters": {
+      "get": {
+        "tags": ["Logistics - Kizad Yard"],
+        "summary": "Get available filter options",
+        "description": "Returns all unique brands, models (grouped by brand), trims (grouped by brand|model), years, and colors for populating search dropdowns.",
+        "responses": {
+          "200": {
+            "description": "Filter options",
+            "content": { "application/json": { "example": { "brands": ["BYD","Honda","Jeep","Lexus","Toyota","Volvo"], "models": { "Toyota": ["Camry","Corolla","Land Cruiser"] }, "trims": { "Toyota|Camry": ["SE","XLE","TRD"] }, "years": [2023,2024,2025,2026], "colors": ["Black","Blue","White"] } } }
+          }
+        }
+      }
+    }
+  }
+}
