@@ -20,9 +20,12 @@ app.use('/docs', swaggerUi.serve, swaggerUi.setup(swaggerDoc, {
 const logisticsRouter = require('./services/logistics');
 app.use('/api/logistics', logisticsRouter);
 
+const designsRouter = require('./services/designs');
+app.use('/api/designs', designsRouter);
+
 // Health check
 app.get('/api/health', (req, res) => {
-  res.json({ status: 'ok', services: ['logistics'], timestamp: new Date().toISOString() });
+  res.json({ status: 'ok', services: ['logistics', 'designs'], timestamp: new Date().toISOString() });
 });
 
 // Root redirect to docs

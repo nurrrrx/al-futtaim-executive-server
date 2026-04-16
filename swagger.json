@@ -112,6 +112,74 @@
           }
         }
       }
+    },
+    "/api/designs": {
+      "get": {
+        "tags": ["Designs"],
+        "summary": "List all saved designs",
+        "description": "Returns a list of saved design files with name, date, and filename.",
+        "responses": {
+          "200": {
+            "description": "List of designs",
+            "content": { "application/json": { "example": { "designs": [{ "name": "Dark Theme v1", "date": "2026-04-16T12:00:00.000Z", "file": "dark_theme_v1.json" }] } } }
+          }
+        }
+      },
+      "post": {
+        "tags": ["Designs"],
+        "summary": "Save a new design",
+        "description": "Saves a design with style overrides. The file is named based on the design name.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["name"],
+                "properties": {
+                  "name": { "type": "string", "example": "Dark Theme v1" },
+                  "overrides": { "type": "object", "example": { "countryCardDualKPI": { "backgroundColor": "#1a1a2e" } } }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Design saved",
+            "content": { "application/json": { "example": { "success": true, "file": "dark_theme_v1.json", "name": "Dark Theme v1", "date": "2026-04-16T12:00:00.000Z" } } }
+          },
+          "400": { "description": "Name is required" }
+        }
+      }
+    },
+    "/api/designs/{file}": {
+      "get": {
+        "tags": ["Designs"],
+        "summary": "Get a specific design",
+        "description": "Returns the full design object including name, date, and style overrides.",
+        "parameters": [
+          { "name": "file", "in": "path", "required": true, "schema": { "type": "string" }, "example": "dark_theme_v1.json" }
+        ],
+        "responses": {
+          "200": {
+            "description": "Design data",
+            "content": { "application/json": { "example": { "name": "Dark Theme v1", "date": "2026-04-16T12:00:00.000Z", "overrides": {} } } }
+          },
+          "404": { "description": "Design not found" }
+        }
+      },
+      "delete": {
+        "tags": ["Designs"],
+        "summary": "Delete a design",
+        "parameters": [
+          { "name": "file", "in": "path", "required": true, "schema": { "type": "string" }, "example": "dark_theme_v1.json" }
+        ],
+        "responses": {
+          "200": { "description": "Design deleted" },
+          "404": { "description": "Design not found" }
+        }
+      }
     }
   }
 }

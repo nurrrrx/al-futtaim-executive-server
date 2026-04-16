@@ -1,3 +1,5 @@
 node_modules/
 .env
 .DS_Store
+services/designs-data/*.json
+!services/designs-data/.gitkeep
