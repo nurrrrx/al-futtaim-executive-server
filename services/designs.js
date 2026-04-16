@@ -21,18 +21,19 @@ function readAllDesigns() {
         name: d.name || f,
         designerName: d.designerName || '',
         description: d.description || '',
-        date: d.date || '',
+        createdDate: d.createdDate || d.date || '',
+        updatedDate: d.updatedDate || '',
+        lastComment: d.lastComment || '',
         file: f,
       };
     } catch {
       return null;
     }
   }).filter(Boolean);
-  // Default always first, then newest first
   designs.sort((a, b) => {
     if (a.name === 'Default') return -1;
     if (b.name === 'Default') return 1;
-    return (b.date || '').localeCompare(a.date || '');
+    return (b.updatedDate || b.createdDate || '').localeCompare(a.updatedDate || a.createdDate || '');
   });
   return designs;
 }
@@ -70,6 +71,7 @@ router.post('/', (req, res) => {
     return res.status(400).json({ error: 'Designer name is required' });
   }
   const id = crypto.randomUUID();
+  const now = new Date().toISOString();
   const safeName = name.replace(/[^a-zA-Z0-9_-]/g, '_').toLowerCase();
   const fileName = safeName + '.json';
   const designData = {
@@ -77,14 +79,43 @@ router.post('/', (req, res) => {
     name,
     designerName,
     description: description || '',
-    date: new Date().toISOString(),
+    createdDate: now,
+    updatedDate: now,
+    lastComment: '',
     overrides: overrides || {},
   };
   try {
     fs.writeFileSync(path.join(DESIGNS_DIR, fileName), JSON.stringify(designData, null, 2));
-    res.json({ success: true, id, file: fileName, name, date: designData.date });
+    res.json({ success: true, id, file: fileName, name, createdDate: now, updatedDate: now });
   } catch (e) {
     res.status(500).json({ error: 'Failed to save design' });
+  }
+});
+
+// PUT /api/designs/:file — update an existing design
+router.put('/:file', (req, res) => {
+  const filePath = path.join(DESIGNS_DIR, req.params.file);
+  if (!filePath.startsWith(DESIGNS_DIR) || !fs.existsSync(filePath)) {
+    return res.status(404).json({ error: 'Design not found' });
+  }
+  try {
+    const raw = fs.readFileSync(filePath, 'utf-8');
+    const existing = JSON.parse(raw);
+    if (existing.name === 'Default') {
+      return res.status(403).json({ error: 'Cannot modify the Default design' });
+    }
+    const { comment, overrides } = req.body;
+    const now = new Date().toISOString();
+    const updated = {
+      ...existing,
+      overrides: overrides || existing.overrides,
+      updatedDate: now,
+      lastComment: comment || '',
+    };
+    fs.writeFileSync(filePath, JSON.stringify(updated, null, 2));
+    res.json({ success: true, file: req.params.file, updatedDate: now });
+  } catch (e) {
+    res.status(500).json({ error: 'Failed to update design' });
   }
 });
 
