@@ -116,19 +116,19 @@
     "/api/designs": {
       "get": {
         "tags": ["Designs"],
-        "summary": "List all saved designs",
-        "description": "Returns a list of saved design files with name, date, and filename.",
+        "summary": "List all designs with full overrides",
+        "description": "Returns all saved designs including their full style overrides.",
         "responses": {
           "200": {
             "description": "List of designs",
-            "content": { "application/json": { "example": { "designs": [{ "name": "Dark Theme v1", "date": "2026-04-16T12:00:00.000Z", "file": "dark_theme_v1.json" }] } } }
+            "content": { "application/json": { "example": { "designs": [{ "id": "abc-123", "name": "Dark Theme v1", "designerName": "Nur", "description": "Dark theme", "overrides": { "countryCardDualKPI": { "backgroundColor": "#1a1a2e" } }, "createdDate": "2026-04-16T12:00:00.000Z", "updatedDate": "2026-04-16T12:00:00.000Z", "lastComment": "", "file": "dark_theme_v1.json" }] } } }
           }
         }
       },
       "post": {
         "tags": ["Designs"],
         "summary": "Save a new design",
-        "description": "Saves a design with style overrides. The file is named based on the design name.",
+        "description": "Saves a design with style overrides. The file is named based on the design name.\n\n⚠️ **Swagger Execute returns a mock response — no actual data is created.**",
         "requestBody": {
           "required": true,
           "content": {
@@ -169,9 +169,39 @@
           "404": { "description": "Design not found" }
         }
       },
+      "put": {
+        "tags": ["Designs"],
+        "summary": "Update a design",
+        "description": "Updates an existing design's overrides and/or comment.\n\n⚠️ **Swagger Execute returns a mock response — no actual data is modified.**",
+        "parameters": [
+          { "name": "file", "in": "path", "required": true, "schema": { "type": "string" }, "example": "dark_theme_v1.json" }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "overrides": { "type": "object", "example": { "countryCardDualKPI": { "backgroundColor": "#1a1a2e" } } },
+                  "comment": { "type": "string", "example": "Updated card colors" }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Design updated",
+            "content": { "application/json": { "example": { "success": true, "file": "dark_theme_v1.json", "updatedDate": "2026-04-16T12:00:00.000Z" } } }
+          },
+          "404": { "description": "Design not found" }
+        }
+      },
       "delete": {
         "tags": ["Designs"],
         "summary": "Delete a design",
+        "description": "Deletes a saved design. The Default design cannot be deleted.\n\n⚠️ **Swagger Execute returns a mock response — no actual data is deleted.**",
         "parameters": [
           { "name": "file", "in": "path", "required": true, "schema": { "type": "string" }, "example": "dark_theme_v1.json" }
         ],

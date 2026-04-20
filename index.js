@@ -1,7 +1,8 @@
 const express = require('express');
 const cors = require('cors');
-const path = require('path');
-const fs = require('fs');
+const compression = require('compression');
+const swaggerUi = require('swagger-ui-express');
+const swaggerDoc = require('./swagger.json');
 const { connectDB } = require('./db');
 const Design = require('./models/Design');
 
@@ -12,53 +13,35 @@ app.use(express.json({ limit: '10mb' }));
 // Connect to MongoDB
 connectDB();
 
-// ── Swagger API Docs ────────────────────────────────────────
-const swaggerUi = require('swagger-ui-express');
-const openApiSpec = require('./openapi');
-app.get('/openapi.json', (req, res) => res.json(openApiSpec));
-app.use('/docs', swaggerUi.serve, swaggerUi.setup(openApiSpec, {
-  customCss: `
-    body { background: #0b1a2e; }
-    .swagger-ui { background: #0b1a2e; }
-    .swagger-ui .topbar { display: none; }
-    .swagger-ui .info .title { color: #fff; }
-    .swagger-ui .info p, .swagger-ui .info li { color: rgba(255,255,255,0.6); }
-    .swagger-ui .scheme-container { background: #0f2240; border-bottom: 1px solid rgba(255,255,255,0.1); }
-    .swagger-ui .opblock-tag { color: #E6A817 !important; border-bottom: 1px solid rgba(255,255,255,0.08); }
-    .swagger-ui .opblock { background: rgba(255,255,255,0.03); border-color: rgba(255,255,255,0.1); }
-    .swagger-ui .opblock .opblock-summary { border-color: rgba(255,255,255,0.08); }
-    .swagger-ui .opblock-description-wrapper p { color: rgba(255,255,255,0.5); }
-    .swagger-ui .parameter__name { color: #E6A817 !important; }
-    .swagger-ui .parameter__type { color: rgba(255,255,255,0.4); }
-    .swagger-ui table thead tr td, .swagger-ui table thead tr th { color: rgba(255,255,255,0.5); border-color: rgba(255,255,255,0.1); }
-    .swagger-ui .response-col_status { color: #4CAF50; }
-    .swagger-ui .responses-inner h4 { color: rgba(255,255,255,0.5); }
-    .swagger-ui .model-title { color: #E6A817; }
-    .swagger-ui input[type=text], .swagger-ui textarea, .swagger-ui select { background: rgba(255,255,255,0.06); color: #fff; border-color: rgba(255,255,255,0.2); }
-    .swagger-ui .btn { border-color: rgba(255,255,255,0.2); }
-    .swagger-ui .btn.execute { background: #E6A817; color: #000; border: none; }
-    .swagger-ui .btn.cancel { background: rgba(255,255,255,0.1); color: #fff; }
-    .swagger-ui .highlight-code { background: rgba(0,0,0,0.3); }
-    .swagger-ui .highlight-code pre { color: #c6c6c6; }
-    .swagger-ui .microlight { background: rgba(0,0,0,0.3) !important; color: #c6c6c6 !important; }
-    .swagger-ui .copy-to-clipboard { background: rgba(255,255,255,0.08); }
-    .swagger-ui .opblock-body pre.microlight { background: rgba(0,0,0,0.4) !important; }
-    .swagger-ui .responses-table .response-col_description { color: rgba(255,255,255,0.5); }
-    .swagger-ui .response-col_links { color: rgba(255,255,255,0.3); }
-    .swagger-ui .model { color: rgba(255,255,255,0.6); }
-    .swagger-ui section.models { border-color: rgba(255,255,255,0.1); }
-    .swagger-ui .servers > label select { background: #0f2240; color: #fff; }
-  `,
-  customSiteTitle: 'Al Futtaim Automotive API',
+// ── Swagger API docs ────────────────────────────────────────────
+app.use('/docs', swaggerUi.serve, swaggerUi.setup(swaggerDoc, {
+  customCss: '.swagger-ui .topbar { display: none }',
+  customSiteTitle: 'Al-Futtaim Executive API',
+  swaggerOptions: {
+    requestInterceptor: (req) => {
+      if (req.method === 'PUT' || req.method === 'DELETE' || req.method === 'POST') {
+        req.url = req.url.split('/api/')[0] + '/api/mock?method=' + req.method;
+        req.method = 'GET';
+      }
+      return req;
+    }
+  }
 }));
 
-// ── API Routes ──────────────────────────────────────────────
-app.use('/api/market-intelligence', require('./routes/marketIntelligence'));
-app.use('/api/sales-insights', require('./routes/salesInsights'));
-app.use('/api/lead-management', require('./routes/leadManagement'));
-app.use('/api/customer-intelligence', require('./routes/customerIntelligence'));
-app.use('/api/financial-intelligence', require('./routes/financialIntelligence'));
-app.use('/api/stock-logistics', require('./routes/stockLogistics'));
+// Mock endpoint for swagger — returns canned responses instead of executing real mutations
+app.get('/api/mock', (req, res) => {
+  const method = req.query.method || 'UNKNOWN';
+  const mocks = {
+    POST:   { mock: true, message: 'This is a mock response — no data was created', success: true, file: 'example.json' },
+    PUT:    { mock: true, message: 'This is a mock response — no data was modified', success: true },
+    DELETE: { mock: true, message: 'This is a mock response — no data was deleted', success: true },
+  };
+  res.json(mocks[method] || { mock: true, message: 'Mock response for ' + method });
+});
+
+// ── Service routers ─────────────────────────────────────────────
+const logisticsRouter = require('./services/logistics');
+app.use('/api/logistics', logisticsRouter);
 
 // ── Existing Endpoints (preserve backward compatibility) ────
 
@@ -73,14 +56,32 @@ app.get('/api/designs', async (req, res) => {
   }
 });
 
-app.get('/api/designs/:file', async (req, res) => {
+// Root redirect to docs
+app.get('/', (req, res) => { res.redirect('/docs'); });
+
+// Auto-seed default design on startup
+async function seedDefault() {
   try {
-    const d = await Design.findOne({ file: req.params.file }).lean();
-    if (!d) return res.status(404).json({ error: 'Not found' });
-    res.json({ id: d._id, name: d.name, file: d.file, designerName: d.designerName, description: d.description, overrides: d.overrides, baseSnapshot: d.baseSnapshot, createdDate: d.createdDate, updatedDate: d.updatedDate, lastComment: d.lastComment });
+    const existing = await Design.findOne({ file: 'default.json' });
+    if (!existing) {
+      await Design.create({
+        name: 'Default',
+        file: 'default.json',
+        designerName: 'System',
+        description: 'Default style configuration',
+        overrides: {},
+        lastComment: '',
+      });
+      console.log('Default design seeded');
+    }
   } catch (e) {
-    res.status(500).json({ error: e.message });
+    console.log('Seed skipped:', e.message);
   }
+}
+setTimeout(seedDefault, 3000);
+
+app.listen(PORT, () => {
+  console.log(`Al-Futtaim Executive Server running on port ${PORT}`);
 });
 
 app.post('/api/designs', async (req, res) => {
