@@ -3,12 +3,18 @@ const cors = require('cors');
 const compression = require('compression');
 const swaggerUi = require('swagger-ui-express');
 const swaggerDoc = require('./swagger.json');
+const { connectDB } = require('./db');
+const Design = require('./models/Design');
+
 const app = express();
 const PORT = process.env.PORT || 3001;
 
 app.use(cors());
 app.use(compression()); // gzip — 3.7MB → ~350KB over the wire
 app.use(express.json());
+
+// Connect to MongoDB
+connectDB();
 
 // ── Swagger API docs ────────────────────────────────────────────
 app.use('/docs', swaggerUi.serve, swaggerUi.setup(swaggerDoc, {
@@ -50,6 +56,27 @@ app.get('/api/health', (req, res) => {
 
 // Root redirect to docs
 app.get('/', (req, res) => { res.redirect('/docs'); });
+
+// Auto-seed default design on startup
+async function seedDefault() {
+  try {
+    const existing = await Design.findOne({ file: 'default.json' });
+    if (!existing) {
+      await Design.create({
+        name: 'Default',
+        file: 'default.json',
+        designerName: 'System',
+        description: 'Default style configuration',
+        overrides: {},
+        lastComment: '',
+      });
+      console.log('Default design seeded');
+    }
+  } catch (e) {
+    console.log('Seed skipped:', e.message);
+  }
+}
+setTimeout(seedDefault, 3000);
 
 app.listen(PORT, () => {
   console.log(`Al-Futtaim Executive Server running on port ${PORT}`);
