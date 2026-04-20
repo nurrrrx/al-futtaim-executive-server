@@ -21,6 +21,7 @@ function readAllDesigns() {
         name: d.name || f,
         designerName: d.designerName || '',
         description: d.description || '',
+        overrides: d.overrides || {},
         createdDate: d.createdDate || d.date || '',
         updatedDate: d.updatedDate || '',
         lastComment: d.lastComment || '',
