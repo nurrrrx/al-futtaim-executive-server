@@ -26,6 +26,7 @@ router.get('/detail', (req, res) => {
 
 router.get('/competition', (req, res) => {
   const { month, period, filters } = getParams(req);
+  // filters already includes { country, brand } from getParams
   res.json(data.getCompetitionIntelligence(month, period, filters));
 });
 

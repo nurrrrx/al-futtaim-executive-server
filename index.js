@@ -207,7 +207,7 @@ app.get('/api', (req, res) => {
       'market-intelligence': {
         'GET /api/market-intelligence/overview': 'Country cards with market size & share. Params: month, period',
         'GET /api/market-intelligence/detail': 'Brand market share for a country. Params: country, month, period',
-        'GET /api/market-intelligence/competition': 'Top 10 brands, winners, losers. Params: month, period',
+        'GET /api/market-intelligence/competition': 'Top 10 brands, winners, losers per country. Params: month, period, country, brand',
         'GET /api/market-intelligence/geo': 'Static geographic config (coordinates, cameras)',
       },
       'sales-insights': {

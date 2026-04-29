@@ -61,8 +61,8 @@ module.exports = {
       get: {
         tags: ['Market Intelligence'],
         summary: 'Top 10 brands, winners & losers',
-        description: 'Market-wide brand ranking by market share. Winners = positive vs last year, Losers = negative.',
-        parameters: [...timeParams, filterBrand],
+        description: 'Brand ranking by market share for the requested country (defaults to UAE if omitted). Winners = positive vs last year, Losers = negative.',
+        parameters: [...timeParams, filterCountry, filterBrand],
         responses: { 200: { description: 'Competition intelligence data' } },
       },
     },

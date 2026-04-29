@@ -66,7 +66,7 @@ const HTML = `<!DOCTYPE html>
         endpoints: [
           { method: 'GET', path: '/api/market-intelligence/overview', desc: 'Country cards — raw market size & share numbers', params: [{ name: 'month', desc: 'YYYY-MM (default: current)' }, { name: 'period', desc: 'MTD or YTD (default: MTD)' }, { name: 'country', desc: 'Filter by country ID (optional)' }] },
           { method: 'GET', path: '/api/market-intelligence/detail', desc: 'Brand market share by country — raw numbers', params: [{ name: 'country', desc: 'Country ID: uae, ksa, oman, qatar, egypt, srilanka (required)' }, { name: 'month', desc: 'YYYY-MM' }, { name: 'period', desc: 'MTD or YTD' }, { name: 'brand', desc: 'Filter by brand name (optional)' }] },
-          { method: 'GET', path: '/api/market-intelligence/competition', desc: 'Top 10 brands, winners & losers — raw numbers', params: [{ name: 'month', desc: 'YYYY-MM' }, { name: 'period', desc: 'MTD or YTD' }, { name: 'brand', desc: 'Filter by brand name (optional)' }] },
+          { method: 'GET', path: '/api/market-intelligence/competition', desc: 'Top 10 brands, winners & losers per country — raw numbers', params: [{ name: 'month', desc: 'YYYY-MM' }, { name: 'period', desc: 'MTD or YTD' }, { name: 'country', desc: 'Country id or name (defaults to UAE if omitted)' }, { name: 'brand', desc: 'Filter by brand name (optional)' }] },
           { method: 'GET', path: '/api/market-intelligence/geo', desc: 'Static geographic config (coordinates, cameras)', params: [] },
         ]
       },

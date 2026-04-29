@@ -19,13 +19,56 @@ const OUR_BRANDS = [
   { name: 'RAM', baseShare: 0.2 }, { name: 'Chrysler', baseShare: 0.1 },
 ];
 
-const MARKET_BRANDS = [
-  { name: 'Toyota', baseShare: 21.6 }, { name: 'Nissan', baseShare: 15.3 },
-  { name: 'Mitsubishi', baseShare: 7.6 }, { name: 'Jetour', baseShare: 6.7 },
-  { name: 'Hyundai', baseShare: 5.8 }, { name: 'Kia', baseShare: 4.2 },
-  { name: 'Ford', baseShare: 3.9 }, { name: 'Renault', baseShare: 2.4 },
-  { name: 'Changan', baseShare: 2.1 }, { name: 'Suzuki', baseShare: 1.8 },
-];
+// Top-10 competition by country. Each list is the brands the local market
+// cares about; values are baseline shares before seeded variation.
+const COMPETITION_BY_COUNTRY = {
+  'United Arab Emirates': [
+    { name: 'Toyota', baseShare: 21.6 }, { name: 'Nissan', baseShare: 15.3 },
+    { name: 'Mitsubishi', baseShare: 7.6 }, { name: 'Hyundai', baseShare: 6.7 },
+    { name: 'Kia', baseShare: 5.8 }, { name: 'Ford', baseShare: 4.2 },
+    { name: 'Mazda', baseShare: 3.9 }, { name: 'MG', baseShare: 2.8 },
+    { name: 'Chevrolet', baseShare: 2.4 }, { name: 'Lexus', baseShare: 2.0 },
+  ],
+  'Kingdom of Saudi Arabia': [
+    { name: 'Toyota', baseShare: 28.4 }, { name: 'Hyundai', baseShare: 14.1 },
+    { name: 'Nissan', baseShare: 9.2 }, { name: 'Kia', baseShare: 7.5 },
+    { name: 'Chevrolet', baseShare: 6.0 }, { name: 'Ford', baseShare: 4.3 },
+    { name: 'Mazda', baseShare: 3.7 }, { name: 'GMC', baseShare: 3.1 },
+    { name: 'MG', baseShare: 2.5 }, { name: 'Geely', baseShare: 2.0 },
+  ],
+  'Oman': [
+    { name: 'Toyota', baseShare: 32.1 }, { name: 'Nissan', baseShare: 13.5 },
+    { name: 'Hyundai', baseShare: 8.4 }, { name: 'Kia', baseShare: 6.7 },
+    { name: 'Mitsubishi', baseShare: 5.9 }, { name: 'Mazda', baseShare: 4.8 },
+    { name: 'Chevrolet', baseShare: 3.5 }, { name: 'Suzuki', baseShare: 3.0 },
+    { name: 'Honda', baseShare: 2.4 }, { name: 'Ford', baseShare: 2.1 },
+  ],
+  'Qatar': [
+    { name: 'Toyota', baseShare: 27.8 }, { name: 'Nissan', baseShare: 16.9 },
+    { name: 'Mitsubishi', baseShare: 8.1 }, { name: 'Hyundai', baseShare: 7.0 },
+    { name: 'Kia', baseShare: 5.4 }, { name: 'Honda', baseShare: 3.8 },
+    { name: 'GAC', baseShare: 3.0 }, { name: 'Ford', baseShare: 2.6 },
+    { name: 'MG', baseShare: 2.3 }, { name: 'Lexus', baseShare: 2.0 },
+  ],
+  'Egypt': [
+    { name: 'Hyundai', baseShare: 18.6 }, { name: 'Chevrolet', baseShare: 13.4 },
+    { name: 'Nissan', baseShare: 10.2 }, { name: 'Mitsubishi', baseShare: 8.7 },
+    { name: 'MG', baseShare: 6.5 }, { name: 'BYD', baseShare: 5.8 },
+    { name: 'Toyota', baseShare: 5.0 }, { name: 'Kia', baseShare: 4.4 },
+    { name: 'Renault', baseShare: 3.6 }, { name: 'Suzuki', baseShare: 2.9 },
+  ],
+  'Sri Lanka': [
+    { name: 'Toyota', baseShare: 21.6 }, { name: 'Nissan', baseShare: 15.3 },
+    { name: 'Mitsubishi', baseShare: 7.6 }, { name: 'Jetour', baseShare: 6.7 },
+    { name: 'Hyundai', baseShare: 5.8 }, { name: 'Kia', baseShare: 4.2 },
+    { name: 'Ford', baseShare: 3.9 }, { name: 'Renault', baseShare: 2.4 },
+    { name: 'Changan', baseShare: 2.1 }, { name: 'Suzuki', baseShare: 1.8 },
+  ],
+};
+
+// Default fallback when no country is specified — preserves prior behaviour
+// for any caller that hasn't been updated yet.
+const DEFAULT_COMPETITION_BRANDS = COMPETITION_BY_COUNTRY['United Arab Emirates'];
 
 const BRAND_COUNTRY_MAP = {
   'United Arab Emirates': OUR_BRANDS,
@@ -142,22 +185,31 @@ function getCountryDetail(countryId, month, period, { brand } = {}) {
   };
 }
 
-function getMonthCompData(monthStr) {
-  return MARKET_BRANDS.map(b => {
-    const brng = new SeededRandom(`comp-${b.name}-${monthStr}`);
+function resolveCountryName(countryRef) {
+  if (!countryRef) return null;
+  const found = COUNTRIES.find(c => c.id === countryRef || c.name === countryRef);
+  return found ? found.name : countryRef;
+}
+
+function getMonthCompData(monthStr, countryName) {
+  const brands = (countryName && COMPETITION_BY_COUNTRY[countryName]) || DEFAULT_COMPETITION_BRANDS;
+  const seedKey = countryName || 'global';
+  return brands.map(b => {
+    const brng = new SeededRandom(`comp-${seedKey}-${b.name}-${monthStr}`);
     return { name: b.name, val: fmtDec(brng.vary(b.baseShare, 0.15)), lyChange: fmtDec(brng.float(-1.8, 1.8)) };
   });
 }
 
-/** GET /api/market-intelligence/competition?month=&period=&brand= */
-function getCompetitionIntelligence(month, period, { brand } = {}) {
+/** GET /api/market-intelligence/competition?month=&period=&brand=&country= */
+function getCompetitionIntelligence(month, period, { brand, country } = {}) {
   const { year, month: m } = parseMonth(month);
+  const countryName = resolveCountryName(country);
   let topBrands;
 
   if (period === 'YTD') {
     const accum = {};
     for (let i = 1; i <= m; i++) {
-      getMonthCompData(`${year}-${String(i).padStart(2, '0')}`).forEach(b => {
+      getMonthCompData(`${year}-${String(i).padStart(2, '0')}`, countryName).forEach(b => {
         if (!accum[b.name]) accum[b.name] = { sumVal: 0, sumLy: 0, count: 0 };
         accum[b.name].sumVal += b.val; accum[b.name].sumLy += b.lyChange; accum[b.name].count++;
       });
@@ -166,7 +218,7 @@ function getCompetitionIntelligence(month, period, { brand } = {}) {
       brand: name, marketShare: fmtDec(a.sumVal / a.count), vsLastYear: fmtDec(a.sumLy / a.count),
     })).sort((a, b) => b.marketShare - a.marketShare);
   } else {
-    topBrands = getMonthCompData(month).map(b => ({
+    topBrands = getMonthCompData(month, countryName).map(b => ({
       brand: b.name, marketShare: b.val, vsLastYear: b.lyChange,
     })).sort((a, b) => b.marketShare - a.marketShare);
   }
@@ -176,7 +228,7 @@ function getCompetitionIntelligence(month, period, { brand } = {}) {
   const winners = topBrands.filter(b => b.vsLastYear >= 0).slice(0, 5);
   const losers = topBrands.filter(b => b.vsLastYear < 0).slice(0, 5);
 
-  return { month, period, topBrands, winners, losers };
+  return { month, period, country: countryName || null, topBrands, winners, losers };
 }
 
 /** GET /api/market-intelligence/geo */
