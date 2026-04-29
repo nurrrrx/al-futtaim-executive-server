@@ -184,8 +184,10 @@ app.delete('/api/layouts/:file', async (req, res) => {
   }
 });
 
-// Logistics grid — file lives inside the server repo so Railway can find it.
-const GRID_DATA_PATH = path.join(__dirname, 'data', '(v2)', 'logistics', 'yard_grid_data.json');
+// Logistics grid — full Kizad yard data including the `cells` array
+// (per-spot car occupancy). The client visualization reads `data.cells`,
+// so we must serve the full file, not the slim grid skeleton.
+const GRID_DATA_PATH = path.join(__dirname, 'services', 'logistics-data', 'kizad_full_data.json');
 app.get('/api/logistics/grid/full', (req, res) => {
   if (fs.existsSync(GRID_DATA_PATH)) {
     res.json(JSON.parse(fs.readFileSync(GRID_DATA_PATH, 'utf8')));
