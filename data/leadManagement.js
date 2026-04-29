@@ -93,13 +93,65 @@ function generateLostReasons(seedPrefix, transitionKey, lostCount, month) {
 }
 
 /**
- * Generate conversion rate time series (12 weekly points) for a given conversion.
+ * Generate conversion rate time series for all three period scopes
+ * (Monthly, Weekly, Daily) ending at the requested `month`. Each series
+ * carries point labels suitable for a multi-layer x-axis on the client.
+ *
+ * Shape returned (one entry per period):
+ *   Monthly: 12 points, label "MMM-YY"  (e.g., "Dec-25")  – single layer
+ *   Weekly:  12 points, label "W1..W4", group "MMM"       – two layers
+ *   Daily:   N points (days in month), label "DD",
+ *            group "MMM-YY"                                – two layers
  */
-function generateConversionSeries(seedPrefix, convName, baseRate, month) {
-  return Array.from({ length: 12 }, (_, w) => {
-    const wrng = new SeededRandom(`${seedPrefix}-conv-${convName}-${month}-${w}`);
-    return { week: `W${w + 1}`, value: fmtDec(wrng.vary(baseRate, 0.15)) };
+const MONTH_NAMES = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+
+function generateConversionSeries(seedPrefix, convName, baseRate, monthStr) {
+  const [yyStr, mmStr] = monthStr.split('-');
+  const yy = parseInt(yyStr, 10);
+  const mm = parseInt(mmStr, 10);
+
+  // Monthly: 12 months ending at `month` (current is the last point).
+  const Monthly = Array.from({ length: 12 }, (_, i) => {
+    const monthsBack = 11 - i;
+    let m = mm - monthsBack;
+    let y = yy;
+    while (m <= 0) { m += 12; y -= 1; }
+    const label = `${MONTH_NAMES[m - 1]}-${String(y).slice(-2)}`;
+    const rng = new SeededRandom(`${seedPrefix}-conv-${convName}-${y}-${m}-monthly`);
+    return { label, value: fmtDec(rng.vary(baseRate, 0.15)) };
   });
+
+  // Weekly: 12 weeks (last 3 months × 4 weeks). Group label = month, so
+  // the client can render the month as a span underneath W1..W4.
+  const Weekly = Array.from({ length: 12 }, (_, i) => {
+    const monthsBack = 2 - Math.floor(i / 4);
+    const weekInMonth = (i % 4) + 1;
+    let m = mm - monthsBack;
+    let y = yy;
+    while (m <= 0) { m += 12; y -= 1; }
+    const rng = new SeededRandom(`${seedPrefix}-conv-${convName}-${y}-${m}-W${weekInMonth}`);
+    return {
+      label: `W${weekInMonth}`,
+      group: MONTH_NAMES[m - 1],
+      value: fmtDec(rng.vary(baseRate, 0.15)),
+    };
+  });
+
+  // Daily: every day of the requested month, single month so group label
+  // is "MMM-YY" (used as a single span underneath the day numbers).
+  const daysInMonth = new Date(yy, mm, 0).getDate();
+  const monthYearLabel = `${MONTH_NAMES[mm - 1]}-${String(yy).slice(-2)}`;
+  const Daily = Array.from({ length: daysInMonth }, (_, i) => {
+    const day = i + 1;
+    const rng = new SeededRandom(`${seedPrefix}-conv-${convName}-${yy}-${mm}-${day}`);
+    return {
+      label: String(day).padStart(2, '0'),
+      group: monthYearLabel,
+      value: fmtDec(rng.vary(baseRate, 0.15)),
+    };
+  });
+
+  return { Monthly, Weekly, Daily };
 }
 
 /**
@@ -165,7 +217,7 @@ function getFunnel(month, period) {
     { name: 'Reservations → Invoices', base: cr(stageVal('Invoices'), stageVal('Reservations')) },
   ].map(s => ({
     name: s.name,
-    points: generateConversionSeries('overall', s.name, s.base, month),
+    pointsByPeriod: generateConversionSeries('overall', s.name, s.base, month),
   }));
 
   // ── Lost reasons per transition ──
@@ -204,7 +256,7 @@ function getFunnel(month, period) {
       { name: 'Reservations → Invoices', base: cr(bStageVal('Invoices'), bStageVal('Reservations')) },
     ].map(s => ({
       name: s.name,
-      points: generateConversionSeries(`brand-${brand}`, s.name, s.base, month),
+      pointsByPeriod: generateConversionSeries(`brand-${brand}`, s.name, s.base, month),
     }));
 
     return {
