@@ -9,12 +9,14 @@ const COUNTRIES = [
   { id: 'srilanka', name: 'Sri Lanka', baseSize: 900, baseShare: 0.2, coordinate: [80.628, 8.153], camera: { center: [80.7, 7.9], zoom: 7.0 } },
 ];
 
+const { BRANDS: ALL_BRAND_NAMES } = require('./brandsModels');
 const OUR_BRANDS = [
-  { name: 'Toyota', baseShare: 21.6 }, { name: 'BYD', baseShare: 2.7 },
-  { name: 'Honda', baseShare: 1.9 }, { name: 'Lexus', baseShare: 1.6 },
-  { name: 'Denza', baseShare: 0.7 }, { name: 'Jeep', baseShare: 0.5 },
-  { name: 'Dodge', baseShare: 0.3 }, { name: 'Volvo', baseShare: 0.1 },
-  { name: 'Polestar', baseShare: 0.1 }, { name: 'Yangwang', baseShare: 0.05 },
+  { name: 'Toyota', baseShare: 21.6 }, { name: 'Lexus', baseShare: 1.6 },
+  { name: 'BYD', baseShare: 2.7 }, { name: 'Honda', baseShare: 1.9 },
+  { name: 'Volvo', baseShare: 0.1 }, { name: 'Polestar', baseShare: 0.1 },
+  { name: 'Jeep', baseShare: 0.5 }, { name: 'Denza', baseShare: 0.7 },
+  { name: 'YangWang', baseShare: 0.05 }, { name: 'Dodge', baseShare: 0.3 },
+  { name: 'RAM', baseShare: 0.2 }, { name: 'Chrysler', baseShare: 0.1 },
 ];
 
 const MARKET_BRANDS = [

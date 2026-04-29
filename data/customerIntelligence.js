@@ -1,4 +1,4 @@
-const { SeededRandom, fmt, fmtDec, deltaObj, seasonFactor, yearTrend } = require('./seedEngine');
+const { SeededRandom, fmtDec, seasonFactor, yearTrend } = require('./seedEngine');
 
 function parseMonth(m) { const [y, mo] = m.split('-').map(Number); return { year: y, month: mo }; }
 
@@ -9,16 +9,15 @@ function getOverview(month, period) {
   const rng = new SeededRandom(`cust-overview-${month}`);
 
   const kpi = {
-    activeCustomers: { value: Math.round(rng.vary(185000, 0.05)), vsLastYear: deltaObj(rng.float(2, 8)) },
-    newlyJoined: { value: Math.round(rng.vary(4200 * sf, 0.12)), vsLastYear: deltaObj(rng.float(-5, 15)) },
-    blueCustomers: { value: Math.round(rng.vary(42000, 0.06)), vsLastYear: deltaObj(rng.float(1, 6)) },
-    npsSales: { value: fmtDec(rng.vary(72, 0.08)), vsLastYear: deltaObj(rng.float(-3, 5)) },
-    npsAftersales: { value: fmtDec(rng.vary(68, 0.08)), vsLastYear: deltaObj(rng.float(-4, 6)) },
-    sentimentScore: { value: fmtDec(rng.vary(78, 0.06)), vsLastYear: deltaObj(rng.float(-2, 4)) },
-    csatScore: { value: fmtDec(rng.vary(82, 0.05)), vsLastYear: deltaObj(rng.float(-1, 3)) },
+    activeCustomers: { value: Math.round(rng.vary(185000, 0.05)), vsLastYear: fmtDec(rng.float(2, 8)) },
+    newlyJoined: { value: Math.round(rng.vary(4200 * sf, 0.12)), vsLastYear: fmtDec(rng.float(-5, 15)) },
+    blueCustomers: { value: Math.round(rng.vary(42000, 0.06)), vsLastYear: fmtDec(rng.float(1, 6)) },
+    npsSales: { value: fmtDec(rng.vary(72, 0.08)), vsLastYear: fmtDec(rng.float(-3, 5)) },
+    npsAftersales: { value: fmtDec(rng.vary(68, 0.08)), vsLastYear: fmtDec(rng.float(-4, 6)) },
+    sentimentScore: { value: fmtDec(rng.vary(78, 0.06)), vsLastYear: fmtDec(rng.float(-2, 4)) },
+    csatScore: { value: fmtDec(rng.vary(82, 0.05)), vsLastYear: fmtDec(rng.float(-1, 3)) },
   };
 
-  // Demographics
   const nationalities = [
     { label: 'Indian', pct: 32 }, { label: 'Emirati', pct: 18 }, { label: 'Pakistani', pct: 14 },
     { label: 'Filipino', pct: 11 }, { label: 'Egyptian', pct: 8 },
@@ -45,7 +44,7 @@ function getSentiment(month, period) {
       positive,
       negative: 100 - positive,
       totalMentions: Math.round(trng.vary(450, 0.3)),
-      trend: deltaObj(trng.float(-5, 8)),
+      trend: fmtDec(trng.float(-5, 8)),
     };
   });
 
@@ -57,7 +56,8 @@ function getSentiment(month, period) {
 /** GET /api/customer-intelligence/brand-comparison */
 function getBrandComparison(month, period) {
   const rng = new SeededRandom(`brand-comp-${month}`);
-  const brands = ['Toyota', 'BYD', 'Honda', 'Lexus'].map(b => {
+  const { BRANDS: ALL_BRANDS } = require('./brandsModels');
+  const brands = ALL_BRANDS.map(b => {
     const brng = new SeededRandom(`brand-comp-${b}-${month}`);
     return {
       brand: b,
@@ -65,10 +65,7 @@ function getBrandComparison(month, period) {
       csat: fmtDec(brng.vary(80, 0.08)),
       sentiment: fmtDec(brng.vary(75, 0.1)),
       activeCustomers: Math.round(brng.vary(b === 'Toyota' ? 85000 : 25000, 0.1)),
-      demographics: {
-        avgAge: Math.round(brng.vary(38, 0.1)),
-        malePct: Math.round(brng.vary(70, 0.08)),
-      },
+      demographics: { avgAge: Math.round(brng.vary(38, 0.1)), malePct: Math.round(brng.vary(70, 0.08)) },
     };
   });
 

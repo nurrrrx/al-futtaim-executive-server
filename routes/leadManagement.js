@@ -8,16 +8,19 @@ function getParams(req) {
   return { month, period };
 }
 
-// GET /api/lead-management/overview?month=2026-03&period=MTD
-router.get('/overview', (req, res) => {
+// GET /api/lead-management/funnel?month=2026-03&period=MTD
+// Returns: stages (KPI cards), funnel conversions, conversion time series,
+//          lost reasons per transition, reactivation, and per-brand breakdown.
+router.get('/funnel', (req, res) => {
   const { month, period } = getParams(req);
-  res.json(data.getOverview(month, period));
+  res.json(data.getFunnel(month, period));
 });
 
-// GET /api/lead-management/brands?month=2026-03&period=MTD
-router.get('/brands', (req, res) => {
+// GET /api/lead-management/geo?month=2026-03&period=MTD
+// Returns: per-region KPIs, brand conversions, and model breakdowns.
+router.get('/geo', (req, res) => {
   const { month, period } = getParams(req);
-  res.json(data.getBrandBreakdown(month, period));
+  res.json(data.getGeo(month, period));
 });
 
 module.exports = router;

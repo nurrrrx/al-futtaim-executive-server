@@ -4,6 +4,7 @@ const path = require('path');
 const fs = require('fs');
 const { connectDB } = require('./db');
 const Design = require('./models/Design');
+const Layout = require('./models/Layout');
 
 const app = express();
 app.use(cors());
@@ -123,8 +124,68 @@ app.delete('/api/designs/:file', async (req, res) => {
   }
 });
 
-// Logistics grid (existing)
-const GRID_DATA_PATH = path.join(__dirname, '..', 'data', '(v2)', 'logistics', 'yard_grid_data.json');
+// Layouts API — MongoDB-backed persistent storage for card positions/sizes
+
+app.get('/api/layouts', async (req, res) => {
+  try {
+    const layouts = await Layout.find({}).lean();
+    res.json({ layouts: layouts.map(d => ({ id: d._id, name: d.name, file: d.file, designerName: d.designerName, description: d.description, positions: d.positions, basePositions: d.basePositions, createdDate: d.createdDate, updatedDate: d.updatedDate, lastComment: d.lastComment })) });
+  } catch (e) {
+    res.json({ layouts: [] });
+  }
+});
+
+app.get('/api/layouts/:file', async (req, res) => {
+  try {
+    const d = await Layout.findOne({ file: req.params.file }).lean();
+    if (!d) return res.status(404).json({ error: 'Not found' });
+    res.json({ id: d._id, name: d.name, file: d.file, designerName: d.designerName, description: d.description, positions: d.positions, basePositions: d.basePositions, createdDate: d.createdDate, updatedDate: d.updatedDate, lastComment: d.lastComment });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.post('/api/layouts', async (req, res) => {
+  try {
+    const { name, designerName, description, positions, basePositions } = req.body;
+    const file = `${name.replace(/[^a-zA-Z0-9-_ ]/g, '').replace(/\s+/g, '-').toLowerCase()}.json`;
+    const d = await Layout.findOneAndUpdate(
+      { file },
+      { name, file, designerName: designerName || '', description: description || '', positions: positions || {}, basePositions: basePositions || null, lastComment: '' },
+      { upsert: true, new: true, setDefaultsOnInsert: true }
+    );
+    res.json({ file: d.file, id: d._id, name: d.name });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.put('/api/layouts/:file', async (req, res) => {
+  try {
+    const update = {};
+    if (req.body.positions) update.positions = req.body.positions;
+    if (req.body.comment) update.lastComment = req.body.comment;
+    if (req.body.name) update.name = req.body.name;
+    if (req.body.designerName) update.designerName = req.body.designerName;
+    if (req.body.description !== undefined) update.description = req.body.description;
+    await Layout.findOneAndUpdate({ file: req.params.file }, update);
+    res.json({ ok: true });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.delete('/api/layouts/:file', async (req, res) => {
+  try {
+    await Layout.findOneAndDelete({ file: req.params.file });
+    res.json({ ok: true });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// Logistics grid — file lives inside the server repo so Railway can find it.
+const GRID_DATA_PATH = path.join(__dirname, 'data', '(v2)', 'logistics', 'yard_grid_data.json');
 app.get('/api/logistics/grid/full', (req, res) => {
   if (fs.existsSync(GRID_DATA_PATH)) {
     res.json(JSON.parse(fs.readFileSync(GRID_DATA_PATH, 'utf8')));

@@ -6,7 +6,7 @@ function getParams(req) {
   return {
     month: req.query.month || new Date().toISOString().slice(0, 7),
     period: req.query.period || 'MTD',
-    filters: { country: req.query.country, brand: req.query.brand, showroom: req.query.showroom },
+    filters: { country: req.query.country, brand: req.query.brand, showroom: req.query.showroom, model: req.query.model },
   };
 }
 
@@ -28,6 +28,11 @@ router.get('/model-channel', (req, res) => {
 router.get('/showroom', (req, res) => {
   const { month, period, filters } = getParams(req);
   res.json(data.getShowroomView(month, period, filters));
+});
+
+// GET /api/sales-insights/geo?country=
+router.get('/geo', (req, res) => {
+  res.json(data.getGeo({ country: req.query.country }));
 });
 
 module.exports = router;

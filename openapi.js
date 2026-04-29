@@ -115,22 +115,22 @@ module.exports = {
     },
 
     // ── Lead Management ──
-    '/api/lead-management/overview': {
+    '/api/lead-management/funnel': {
       get: {
         tags: ['Lead Management'],
-        summary: 'Lead funnel, conversion rates, lost reasons',
-        description: 'Full funnel: Leads → Hot Leads → Visits → Test Drives → Reservations → Invoices. Weekly conversion rate trends and top 5 lost lead reasons.',
+        summary: 'Full lead funnel with KPI cards, conversions, lost reasons, and brand breakdown',
+        description: 'Returns: (1) 6 KPI stages (Leads→Invoices) with value/target/lastYear, (2) funnel conversion rates (current/lastYear/target), (3) weekly conversion time series, (4) lost reasons per transition stage, (5) lost leads re-activation, (6) per-brand breakdown with the same structure.',
         parameters: [...timeParams],
-        responses: { 200: { description: 'Lead overview data' } },
+        responses: { 200: { description: 'Full lead funnel data' } },
       },
     },
-    '/api/lead-management/brands': {
+    '/api/lead-management/geo': {
       get: {
         tags: ['Lead Management'],
-        summary: 'Lead metrics by brand and region',
-        description: 'Per-brand leads, hot leads, conversion rate. Regional breakdown (UAE, KSA).',
+        summary: 'Lead metrics by region with brand and model breakdowns',
+        description: 'Per-region (UAE, KSA) lead KPIs, brand-level conversion rates with vs-last-year and vs-target deltas, and model-level breakdown per brand.',
         parameters: [...timeParams],
-        responses: { 200: { description: 'Brand lead data' } },
+        responses: { 200: { description: 'Regional lead geo data' } },
       },
     },
 
