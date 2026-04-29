@@ -51,19 +51,31 @@ function getOverview(month, period, { country, brand } = {}) {
   const { year, month: m } = parseMonth(month);
   const sf = seasonFactor(m);
   const yt = yearTrend(year);
+  const isYTD = String(period).toUpperCase() === 'YTD';
 
   let countryList = COUNTRIES;
   if (country) countryList = COUNTRIES.filter(c => c.id === country.toLowerCase() || c.name.toLowerCase() === country.toLowerCase());
 
   const countryBreakdown = countryList.map(c => {
-    const crng = new SeededRandom(`sales-country-${c.id}-${month}`);
-    const salesVolume = Math.round(crng.vary(c.baseSales * sf * yt, 0.1));
-    const salesVolumeTarget = Math.round(crng.vary(salesVolume * 1.05, 0.08));
-    const salesVolumeLastYear = Math.round(crng.vary(salesVolume * 1.15, 0.12));
     const salesPlan = generateSalesPlan(c.id, c.baseSales, year, m);
     const fullYearValue = salesPlan.reduce((s, p) => s + p.value, 0);
     const fullYearTarget = salesPlan.reduce((s, p) => s + p.target, 0);
     const fullYearLastYear = salesPlan.reduce((s, p) => s + p.lastYear, 0);
+
+    let salesVolume, salesVolumeTarget, salesVolumeLastYear;
+    if (isYTD) {
+      // YTD: cumulative sum of months 1..m from the same plan that drives the
+      // bar chart, so KPI and chart agree.
+      salesVolume = salesPlan.slice(0, m).reduce((s, p) => s + p.value, 0);
+      salesVolumeTarget = salesPlan.slice(0, m).reduce((s, p) => s + p.target, 0);
+      salesVolumeLastYear = salesPlan.slice(0, m).reduce((s, p) => s + p.lastYear, 0);
+    } else {
+      // MTD: just the selected month from the plan.
+      const cur = salesPlan[m - 1] || { value: 0, target: 0, lastYear: 0 };
+      salesVolume = cur.value;
+      salesVolumeTarget = cur.target;
+      salesVolumeLastYear = cur.lastYear;
+    }
 
     return {
       countryId: c.id, country: c.name,
@@ -77,8 +89,20 @@ function getOverview(month, period, { country, brand } = {}) {
   const totalSalesTarget = countryBreakdown.reduce((s, c) => s + c.salesVolumeTarget, 0);
   const totalSalesLastYear = countryBreakdown.reduce((s, c) => s + c.salesVolumeLastYear, 0);
 
-  const rng = new SeededRandom(`sales-kpi-${month}`);
-  const revenue = fmtDec(rng.vary(1850 * sf * yt, 0.12));
+  // Revenue / gross margin: scale revenue cumulatively for YTD using the
+  // monthly seasonality up to the selected month so the KPI matches the
+  // YTD volume story. Margin stays a percentage so it's period-invariant.
+  const rng = new SeededRandom(`sales-kpi-${month}-${isYTD ? 'ytd' : 'mtd'}`);
+  const monthlyRevenue = 1850 * sf * yt;
+  let revenueRaw;
+  if (isYTD) {
+    let acc = 0;
+    for (let i = 1; i <= m; i++) acc += 1850 * seasonFactor(i) * yt;
+    revenueRaw = rng.vary(acc, 0.06);
+  } else {
+    revenueRaw = rng.vary(monthlyRevenue, 0.12);
+  }
+  const revenue = fmtDec(revenueRaw);
   const revenueLastYear = fmtDec(rng.vary(revenue * 1.08, 0.1));
   const grossMargin = fmtDec(rng.vary(18.5, 0.1));
   const grossMarginLastYear = fmtDec(rng.vary(grossMargin - 0.5, 0.15));
