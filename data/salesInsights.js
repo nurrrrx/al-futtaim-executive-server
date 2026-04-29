@@ -95,9 +95,32 @@ function getOverview(month, period, { country, brand } = {}) {
     return { brand: b, salesVolume: sales, salesVolumeLastYear: salesLastYear, salesVolumeTarget: salesTarget };
   });
 
+  // Compute per-(country × brand × month) sales plan when a brand filter is
+  // set. The detail-card bar chart has to follow the user's country/brand
+  // selection, so we scale the country-aggregated plan by the brand's share
+  // within the country totals (matching how brandBreakdown is computed above).
+  // Without this, the chart would show country totals even when a specific
+  // brand is selected.
+  let brandShareFactor = 1;
+  if (brand) {
+    const idx = BRANDS.indexOf(brand);
+    if (idx >= 0) {
+      const brng = new SeededRandom(`sales-brand-share-${brand}-${month}`);
+      brandShareFactor = BRAND_SHARES[idx] * brng.vary(1, 0.05);
+    }
+  }
   const totalSalesPlan = MONTH_KEYS.map((mk, i) => {
     let value = 0, target = 0, lastYear = 0;
     countryBreakdown.forEach(c => { const p = c.salesPlan[i]; value += p.value; target += p.target; lastYear += p.lastYear; });
+    if (brand) {
+      // Per-month variance on top of the brand's global share so the bar
+      // shape feels distinct rather than a perfect scaled-down country plan.
+      const mrng = new SeededRandom(`sales-brand-month-${brand}-${month}-${i}`);
+      const f = brandShareFactor * mrng.vary(1, 0.06);
+      value = Math.round(value * f);
+      target = Math.round(target * f);
+      lastYear = Math.round(lastYear * f);
+    }
     return { month: mk, isActual: i < m, value, target, lastYear };
   });
 
