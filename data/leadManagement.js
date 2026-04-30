@@ -105,14 +105,25 @@ function generateLostReasons(seedPrefix, transitionKey, lostCount, month) {
  */
 const MONTH_NAMES = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
 
-function generateConversionSeries(seedPrefix, convName, baseRate, monthStr) {
+function generateConversionSeries(seedPrefix, convName, baseRate, monthStr, period) {
   const [yyStr, mmStr] = monthStr.split('-');
   const yy = parseInt(yyStr, 10);
   const mm = parseInt(mmStr, 10);
 
-  // Monthly: 12 months ending at `month` (current is the last point).
-  const Monthly = Array.from({ length: 12 }, (_, i) => {
-    const monthsBack = 11 - i;
+  // Range: the slicer drives both the start and end of the x-axis.
+  //   MTD → just the selected month (Apr-25 only).
+  //   YTD → start of year through the selected month (Jan-25 .. Apr-25).
+  // Default (no period given) keeps the prior 12-month rolling window for
+  // back-compat with callers that haven't been updated.
+  const isYTD = period === 'YTD';
+  const isMTD = period === 'MTD';
+  const monthsCount = isYTD ? mm : isMTD ? 1 : 12;
+  // The window's first month, expressed as offsets back from `mm`.
+  const firstMonthsBack = monthsCount - 1;
+
+  // Monthly: one point per month in window, label "MMM-YY".
+  const Monthly = Array.from({ length: monthsCount }, (_, i) => {
+    const monthsBack = firstMonthsBack - i;
     let m = mm - monthsBack;
     let y = yy;
     while (m <= 0) { m += 12; y -= 1; }
@@ -121,10 +132,10 @@ function generateConversionSeries(seedPrefix, convName, baseRate, monthStr) {
     return { label, value: fmtDec(rng.vary(baseRate, 0.15)) };
   });
 
-  // Weekly: 12 weeks (last 3 months × 4 weeks). Group label = month, so
-  // the client can render the month as a span underneath W1..W4.
-  const Weekly = Array.from({ length: 12 }, (_, i) => {
-    const monthsBack = 2 - Math.floor(i / 4);
+  // Weekly: 4 weeks per month in window, group label = "MMM-YY" so the
+  // client renders month-year as a span underneath W1..W4.
+  const Weekly = Array.from({ length: monthsCount * 4 }, (_, i) => {
+    const monthsBack = firstMonthsBack - Math.floor(i / 4);
     const weekInMonth = (i % 4) + 1;
     let m = mm - monthsBack;
     let y = yy;
@@ -132,24 +143,30 @@ function generateConversionSeries(seedPrefix, convName, baseRate, monthStr) {
     const rng = new SeededRandom(`${seedPrefix}-conv-${convName}-${y}-${m}-W${weekInMonth}`);
     return {
       label: `W${weekInMonth}`,
-      group: MONTH_NAMES[m - 1],
+      group: `${MONTH_NAMES[m - 1]}-${String(y).slice(-2)}`,
       value: fmtDec(rng.vary(baseRate, 0.15)),
     };
   });
 
-  // Daily: every day of the requested month, single month so group label
-  // is "MMM-YY" (used as a single span underneath the day numbers).
-  const daysInMonth = new Date(yy, mm, 0).getDate();
-  const monthYearLabel = `${MONTH_NAMES[mm - 1]}-${String(yy).slice(-2)}`;
-  const Daily = Array.from({ length: daysInMonth }, (_, i) => {
-    const day = i + 1;
-    const rng = new SeededRandom(`${seedPrefix}-conv-${convName}-${yy}-${mm}-${day}`);
-    return {
-      label: String(day).padStart(2, '0'),
-      group: monthYearLabel,
-      value: fmtDec(rng.vary(baseRate, 0.15)),
-    };
-  });
+  // Daily: every day across each month in the window. Group label is the
+  // month-year span.
+  const Daily = [];
+  for (let mi = 0; mi < monthsCount; mi++) {
+    const monthsBack = firstMonthsBack - mi;
+    let m = mm - monthsBack;
+    let y = yy;
+    while (m <= 0) { m += 12; y -= 1; }
+    const daysInMonth = new Date(y, m, 0).getDate();
+    const monthYearLabel = `${MONTH_NAMES[m - 1]}-${String(y).slice(-2)}`;
+    for (let day = 1; day <= daysInMonth; day++) {
+      const rng = new SeededRandom(`${seedPrefix}-conv-${convName}-${y}-${m}-${day}`);
+      Daily.push({
+        label: String(day).padStart(2, '0'),
+        group: monthYearLabel,
+        value: fmtDec(rng.vary(baseRate, 0.15)),
+      });
+    }
+  }
 
   return { Monthly, Weekly, Daily };
 }
@@ -217,7 +234,7 @@ function getFunnel(month, period) {
     { name: 'Reservations → Invoices', base: cr(stageVal('Invoices'), stageVal('Reservations')) },
   ].map(s => ({
     name: s.name,
-    pointsByPeriod: generateConversionSeries('overall', s.name, s.base, month),
+    pointsByPeriod: generateConversionSeries('overall', s.name, s.base, month, period),
   }));
 
   // ── Lost reasons per transition ──
@@ -256,7 +273,7 @@ function getFunnel(month, period) {
       { name: 'Reservations → Invoices', base: cr(bStageVal('Invoices'), bStageVal('Reservations')) },
     ].map(s => ({
       name: s.name,
-      pointsByPeriod: generateConversionSeries(`brand-${brand}`, s.name, s.base, month),
+      pointsByPeriod: generateConversionSeries(`brand-${brand}`, s.name, s.base, month, period),
     }));
 
     return {
