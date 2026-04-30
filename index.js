@@ -60,6 +60,7 @@ app.use('/api/lead-management', require('./routes/leadManagement'));
 app.use('/api/customer-intelligence', require('./routes/customerIntelligence'));
 app.use('/api/financial-intelligence', require('./routes/financialIntelligence'));
 app.use('/api/stock-logistics', require('./routes/stockLogistics'));
+app.use('/api/aftersales', require('./routes/aftersales'));
 
 // ── Existing Endpoints (preserve backward compatibility) ────
 
