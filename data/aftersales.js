@@ -9,7 +9,7 @@
  *   - MTD: values for the selected month only
  *   - YTD: cumulative sum of months 1..m of the selected year
  */
-const { SeededRandom, fmtDec, seasonFactor, yearTrend, deltaObj } = require('./seedEngine');
+const { SeededRandom, seasonFactor, yearTrend, deltaObj } = require('./seedEngine');
 const { BRANDS } = require('./brandsModels');
 
 function parseMonth(m) { const [y, mo] = m.split('-').map(Number); return { year: y, month: mo }; }
@@ -52,7 +52,25 @@ const WORKSHOPS = [
   { name: 'RAK', region: 'UAE' },
   { name: 'UAQ', region: 'UAE' },
   { name: 'Khorfakkan', region: 'UAE' },
+  { name: 'Riyadh',  region: 'KSA' },
+  { name: 'Jeddah',  region: 'KSA' },
+  { name: 'Dammam',  region: 'KSA' },
+  { name: 'Muscat',  region: 'Oman' },
+  { name: 'Doha',    region: 'Qatar' },
+  { name: 'Cairo',   region: 'Egypt' },
+  { name: 'Colombo', region: 'Sri Lanka' },
 ];
+
+// Allow callers to pass country as either id (uae, ksa) or name (UAE, KSA, …).
+const COUNTRY_ALIASES = {
+  uae: 'UAE', ksa: 'KSA', oman: 'Oman', qatar: 'Qatar', egypt: 'Egypt',
+  srilanka: 'Sri Lanka', 'sri lanka': 'Sri Lanka',
+};
+function normalizeCountry(c) {
+  if (!c) return null;
+  const k = String(c).trim().toLowerCase();
+  return COUNTRY_ALIASES[k] || c;
+}
 
 /** Month-aware visit count for a given seed prefix: respects MTD vs YTD. */
 function visitsForPeriod(seedPrefix, baseVisits, year, m, period) {
@@ -72,7 +90,7 @@ function visitsForPeriod(seedPrefix, baseVisits, year, m, period) {
 
 function fmt(n) { return Math.round(n).toLocaleString('en-US'); }
 
-function buildKpi(rng, current, lastYear, target, formatter = fmt) {
+function buildKpi(current, lastYear, target, formatter = fmt) {
   const vsLY = ((current - lastYear) / Math.max(lastYear, 1)) * 100;
   const vsT = ((current - target) / Math.max(target, 1)) * 100;
   return {
@@ -82,13 +100,22 @@ function buildKpi(rng, current, lastYear, target, formatter = fmt) {
   };
 }
 
-function brandWorkshop(brand, month, period) {
+function brandWorkshop(brand, month, period, { country, branch } = {}) {
   const { year, month: m } = parseMonth(month);
-  const rng = new SeededRandom(`aftersales-workshop-${brand}-${month}-${period}`);
+  const rng = new SeededRandom(`aftersales-workshop-${brand}-${country || 'all'}-${branch || 'all'}-${month}-${period}`);
   const baseVisits = BRAND_BASE_VISITS[brand] ?? 1000;
+  const countryName = normalizeCountry(country);
+  const wsList = WORKSHOPS.filter(w => {
+    if (countryName && w.region !== countryName) return false;
+    if (branch && w.name !== branch) return false;
+    return true;
+  });
+  // Country/branch narrowing scales the brand baseline by share of workshops.
+  const scopeShare = wsList.length / WORKSHOPS.length || 1 / WORKSHOPS.length;
+  const scopedBase = baseVisits * scopeShare;
 
-  const vinVisits = visitsForPeriod(`aftersales-workshop-${brand}`, baseVisits, year, m, period);
-  const lastYearVinVisits = visitsForPeriod(`aftersales-workshop-${brand}`, baseVisits, year - 1, m, period);
+  const vinVisits = visitsForPeriod(`aftersales-workshop-${brand}-${countryName || 'all'}-${branch || 'all'}`, scopedBase, year, m, period);
+  const lastYearVinVisits = visitsForPeriod(`aftersales-workshop-${brand}-${countryName || 'all'}-${branch || 'all'}`, scopedBase, year - 1, m, period);
   const targetVinVisits = Math.round(vinVisits * rng.vary(0.97, 0.04));
 
   // Operational ratios — period-invariant (don't accumulate)
@@ -109,11 +136,11 @@ function brandWorkshop(brand, month, period) {
   const efficiencyTgt = 102;
 
   const kpis = {
-    vinVisits: buildKpi(rng, vinVisits, lastYearVinVisits, targetVinVisits),
-    soldHoursPerVin: buildKpi(rng, soldHoursPerVin, soldHoursPerVinLY, soldHoursPerVinTgt, n => n.toFixed(1)),
-    utilization: buildKpi(rng, utilization, utilizationLY, utilizationTgt, n => `${Math.round(n)}%`),
-    productivity: buildKpi(rng, productivity, productivityLY, productivityTgt, n => `${Math.round(n)}%`),
-    efficiency: buildKpi(rng, efficiency, efficiencyLY, efficiencyTgt, n => `${Math.round(n)}%`),
+    vinVisits: buildKpi(vinVisits, lastYearVinVisits, targetVinVisits),
+    soldHoursPerVin: buildKpi(soldHoursPerVin, soldHoursPerVinLY, soldHoursPerVinTgt, n => n.toFixed(1)),
+    utilization: buildKpi(utilization, utilizationLY, utilizationTgt, n => `${Math.round(n)}%`),
+    productivity: buildKpi(productivity, productivityLY, productivityTgt, n => `${Math.round(n)}%`),
+    efficiency: buildKpi(efficiency, efficiencyLY, efficiencyTgt, n => `${Math.round(n)}%`),
   };
 
   // VIN visits broken down by top model — values sum approx to vinVisits
@@ -133,15 +160,16 @@ function brandWorkshop(brand, month, period) {
     };
   });
 
-  // Per-workshop split — sum approx to vinVisits
-  const wsWeights = WORKSHOPS.map((_, i) => Math.pow(0.85, i));
+  // Per-workshop split — sum approx to vinVisits, scoped to filtered workshops.
+  const wsWeights = wsList.map((_, i) => Math.pow(0.85, i));
   const wsSum = wsWeights.reduce((a, b) => a + b, 0) || 1;
-  const workshops = WORKSHOPS.map((w, i) => {
+  const workshops = wsList.map((w, i) => {
     const share = wsWeights[i] / wsSum;
     const wsRng = new SeededRandom(`aftersales-ws-${brand}-${w.name}-${month}-${period}`);
     return {
       name: w.name,
       brand,
+      region: w.region,
       vinVisits: Math.round(vinVisits * share * wsRng.vary(1, 0.08)),
       efficiency: Math.round(wsRng.vary(95, 0.12)),
       soldHoursPerVin: +wsRng.vary(2.7, 0.18).toFixed(1),
@@ -153,12 +181,12 @@ function brandWorkshop(brand, month, period) {
   return { kpis, vinVisitsByBrand, workshops };
 }
 
-/** GET /api/aftersales/workshop?month=&period=&brand= */
-function getWorkshop(month, period, { brand } = {}) {
+/** GET /api/aftersales/workshop?month=&period=&country=&brand=&branch= */
+function getWorkshop(month, period, { country, brand, branch } = {}) {
   const brandList = brand ? [brand] : BRANDS;
   const brands = {};
-  for (const b of brandList) brands[b] = brandWorkshop(b, month, period);
-  return { month, period, brands };
+  for (const b of brandList) brands[b] = brandWorkshop(b, month, period, { country, branch });
+  return { month, period, country: country || null, brand: brand || null, branch: branch || null, brands };
 }
 
 /** Build a sparkline of weekly points for the last 13 weeks ending on the selected month. */
@@ -200,15 +228,24 @@ function buildSparkline(seedPrefix, baseValue, month, period) {
   return { points, lastYearPoints, aggregate: Math.round(aggregate), aggregateLY: Math.round(aggregateLY) };
 }
 
-/** GET /api/aftersales/details?month=&period= */
-function getDetails(month, period) {
+/** GET /api/aftersales/details?month=&period=&country=&brand= */
+function getDetails(month, period, { country, brand } = {}) {
   const { year, month: m } = parseMonth(month);
+  const countryName = normalizeCountry(country);
+  const scope = `${countryName || 'all'}-${brand || 'all'}`;
   const fromMonth = MONTH_LABELS[Math.max(0, m - 3)];
   const toMonth = MONTH_LABELS[m - 1];
   const dateRange = `${fromMonth} ${String(year).slice(-2)} – ${toMonth} ${String(year).slice(-2)}`;
+  const scopeFactor =
+    (countryName ? (countryName === 'UAE' ? 0.7 : countryName === 'KSA' ? 0.18 : 0.04) : 1) *
+    (brand ? ((BRAND_BASE_VISITS[brand] ?? 1000) / Object.values(BRAND_BASE_VISITS).reduce((a, b) => a + b, 0)) : 1);
 
-  function kpiSpark(seedPrefix, base, unit = '') {
-    const { points, lastYearPoints, aggregate, aggregateLY } = buildSparkline(seedPrefix, base, month, period);
+  function kpiSpark(seedPrefix, baseRaw, unit = '') {
+    // For accumulating KPIs (counts) we narrow the base by scope; for ratios
+    // (% / hrs-per-vin) the value is scope-invariant.
+    const isAccumulating = !unit && baseRaw >= 100;
+    const base = isAccumulating ? baseRaw * scopeFactor : baseRaw;
+    const { points, lastYearPoints, aggregate, aggregateLY } = buildSparkline(`${seedPrefix}-${scope}`, base, month, period);
     const delta = aggregate - aggregateLY;
     const deltaPct = (delta / Math.max(aggregateLY, 1)) * 100;
     const fmtV = unit === '%' ? `${Math.round(aggregate)}%` : fmt(aggregate);
@@ -236,18 +273,24 @@ function getDetails(month, period) {
     productivity: kpiSpark('aftersales-details-prod', 91, '%'),
   };
 
-  // VIN visits by brand (aggregate across all brands)
-  const vinVisitsByBrand = BRANDS.map(brand => ({
-    label: brand,
-    value: visitsForPeriod(`aftersales-details-brand-${brand}`, BRAND_BASE_VISITS[brand] ?? 1000, year, m, period),
-  })).sort((a, b) => b.value - a.value);
+  // VIN visits by brand (filtered when a brand is specified)
+  const brandList = brand ? [brand] : BRANDS;
+  const countryShare = countryName === 'UAE' ? 0.7 : countryName === 'KSA' ? 0.18 : countryName ? 0.04 : 1;
+  const vinVisitsByBrand = brandList.map(b => ({
+    label: b,
+    value: Math.round(
+      visitsForPeriod(`aftersales-details-brand-${b}-${countryName || 'all'}`, (BRAND_BASE_VISITS[b] ?? 1000) * countryShare, year, m, period)
+    ),
+  })).sort((a, b2) => b2.value - a.value);
 
-  // Workshop bubbles — efficiency vs vinVisits scatter for the 12 workshops, summed across brands
-  const workshopBubbles = WORKSHOPS.map(w => {
-    const wsRng = new SeededRandom(`aftersales-details-ws-${w.name}-${month}-${period}`);
-    const visits = Math.round(wsRng.vary(900, 0.5));
+  // Workshop bubbles — efficiency vs vinVisits scatter, scoped to country if set
+  const wsList = WORKSHOPS.filter(w => !countryName || w.region === countryName);
+  const workshopBubbles = wsList.map(w => {
+    const wsRng = new SeededRandom(`aftersales-details-ws-${w.name}-${brand || 'all'}-${month}-${period}`);
+    const visits = Math.round(wsRng.vary(900 * (brand ? (BRAND_BASE_VISITS[brand] ?? 1000) / 12000 : 1), 0.5));
     return {
       name: w.name,
+      region: w.region,
       vinVisits: visits,
       efficiency: Math.round(wsRng.vary(95, 0.12)),
       utilization: Math.round(wsRng.vary(76, 0.10)),
