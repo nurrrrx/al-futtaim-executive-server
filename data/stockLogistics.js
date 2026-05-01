@@ -88,4 +88,84 @@ function getLogistics(month, period) {
   return { month, period, pipeline, brandPipeline };
 }
 
-module.exports = { getOverview, getLogistics };
+/** GET /api/stock-logistics/distribution?month=&period=&country=&brand=&branch= */
+function getDistribution(month, period, { country, brand, branch } = {}) {
+  const scope = `${country || 'all'}-${brand || 'all'}-${branch || 'all'}`;
+  const rng = new SeededRandom(`distribution-${scope}-${month}-${period}`);
+  const isYTD = String(period).toUpperCase() === 'YTD';
+  const { month: m } = parseMonth(month);
+
+  const periodMul = isYTD ? Math.max(1, m * 0.85) : 1;
+  // Country narrowing: rough share-of-business
+  const countryMul = (() => {
+    if (!country) return 1;
+    const k = String(country).toLowerCase();
+    return k === 'uae' ? 0.6 : k === 'ksa' ? 0.22 : k === 'oman' ? 0.06 : k === 'qatar' ? 0.04 : 0.08;
+  })();
+  // Branch narrowing: ~15% of country if a single branch is selected
+  const branchMul = branch ? 0.15 : 1;
+  const scopeMul = countryMul * branchMul * periodMul;
+
+  // Pipeline funnel — preparation/PDI/transfer/delivery
+  const tagged = Math.round(rng.vary(1000 * scopeMul, 0.08));
+  const confirmed = Math.round(tagged * rng.vary(0.5, 0.08));
+  const pdiStart = Math.round(confirmed * rng.vary(0.6, 0.10));
+  const awaitingPdi = Math.max(0, confirmed - pdiStart);
+  const pdiCompleted = Math.round(pdiStart * rng.vary(0.83, 0.06));
+  const pdiNotCompleted = Math.max(0, pdiStart - pdiCompleted);
+  const transferred = Math.round(pdiCompleted * rng.vary(0.8, 0.06));
+  const awaitingTransfer = Math.max(0, pdiCompleted - transferred);
+  const arrived = Math.round(transferred * rng.vary(0.95, 0.04));
+
+  const slaTarget = 95;
+  const slaWithin = Math.round(rng.vary(90, 0.05));
+  const slaOver = Math.max(0, 100 - slaWithin);
+
+  // Brand volumes for the brand bar chart (skip when single brand filtered)
+  const brandList = brand ? [brand] : ['Toyota', 'BYD', 'Honda', 'Lexus', 'Volvo', 'Jeep'];
+  const brands = brandList.map((b, i) => {
+    const brng = new SeededRandom(`distribution-brand-${b}-${scope}-${month}-${period}`);
+    const baseShare = brand ? 1 : Math.pow(0.6, i);
+    return {
+      name: b,
+      vol: Math.round(brng.vary(tagged * baseShare * 0.35, 0.12)),
+    };
+  });
+
+  // Per-showroom (branch) volumes — when a branch is selected, only return it
+  const ALL_SHOWROOMS = [
+    { name: 'Toyota - SHZ Road', country: 'UAE' },
+    { name: 'BYD - DFC',         country: 'UAE' },
+    { name: 'Honda - DFC',       country: 'UAE' },
+    { name: 'Lexus - SZR',       country: 'UAE' },
+    { name: 'Toyota - Riyadh',   country: 'KSA' },
+    { name: 'BYD - Jeddah',      country: 'KSA' },
+  ];
+  const countryName = country ? String(country) : null;
+  const filteredShowrooms = ALL_SHOWROOMS.filter(s => {
+    if (countryName && s.country.toLowerCase() !== countryName.toLowerCase()) return false;
+    if (branch && !s.name.includes(branch)) return false;
+    return true;
+  });
+  const showrooms = (filteredShowrooms.length ? filteredShowrooms : ALL_SHOWROOMS.slice(0, 3)).map((s, i) => {
+    const srng = new SeededRandom(`distribution-showroom-${s.name}-${scope}-${month}-${period}`);
+    const baseShare = Math.pow(0.65, i);
+    return { name: s.name, vol: Math.round(srng.vary(tagged * baseShare * 0.10, 0.15)) };
+  });
+
+  return {
+    month, period, country: country || null, brand: brand || null, branch: branch || null,
+    pipeline: {
+      tagged, confirmed,
+      pdiStart, awaitingPdi,
+      pdiCompleted, pdiNotCompleted,
+      transferred, awaitingTransfer,
+      arrived,
+      slaTarget, slaWithin, slaOver,
+    },
+    brands,
+    showrooms,
+  };
+}
+
+module.exports = { getOverview, getLogistics, getDistribution };
