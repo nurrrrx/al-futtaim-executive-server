@@ -4,12 +4,26 @@ const MONTH_KEYS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep
 
 function parseMonth(m) { const [y, mo] = m.split('-').map(Number); return { year: y, month: mo }; }
 
-/** GET /api/stock-logistics/overview */
-function getOverview(month, period) {
-  const { year, month: m } = parseMonth(month);
-  const rng = new SeededRandom(`stock-overview-${month}`);
+// Country share-of-business multiplier — UAE is the largest market.
+function countryShare(country) {
+  if (!country) return 1;
+  const k = String(country).toLowerCase();
+  return k === 'uae' ? 0.6 : k === 'ksa' ? 0.22 : k === 'oman' ? 0.06
+       : k === 'qatar' ? 0.04 : k === 'egypt' ? 0.05 : k === 'srilanka' || k === 'sri lanka' ? 0.03 : 1;
+}
 
-  const totalInventory = Math.round(rng.vary(8500, 0.1));
+/** GET /api/stock-logistics/overview?month=&period=&country=&brand= */
+function getOverview(month, period, { country, brand } = {}) {
+  const { year, month: m } = parseMonth(month);
+  const scope = `${country || 'all'}-${brand || 'all'}`;
+  const rng = new SeededRandom(`stock-overview-${scope}-${month}-${period}`);
+  const cMul = countryShare(country);
+  const { BRAND_SHARES_ARRAY } = require('./brandsModels');
+  const brandShares = BRAND_SHARES_ARRAY;
+  const bMul = brand ? (brandShares[BRANDS.indexOf(brand)] ?? 0.1) : 1;
+
+  const baseInventory = 8500 * cMul * bMul;
+  const totalInventory = Math.round(rng.vary(baseInventory, 0.1));
   const newInventory = Math.round(totalInventory * rng.vary(0.75, 0.05));
   const usedInventory = Math.round(totalInventory * rng.vary(0.2, 0.08));
   const demoInventory = totalInventory - newInventory - usedInventory;
@@ -28,12 +42,13 @@ function getOverview(month, period) {
     stockDepth: +stockDepth, stockDepthTarget,
   };
 
-  // Stock by brand
-  const { BRAND_SHARES_ARRAY } = require('./brandsModels');
-  const brandShares = BRAND_SHARES_ARRAY;
-  const brandStock = BRANDS.map((b, i) => {
-    const brng = new SeededRandom(`stock-brand-${b}-${month}`);
-    const inventory = Math.round(totalInventory * brandShares[i] * brng.vary(1, 0.1));
+  // Stock by brand — when a brand filter is set, only return that brand
+  const brandList = brand ? [brand] : BRANDS;
+  const brandStock = brandList.map(b => {
+    const i = BRANDS.indexOf(b);
+    const share = brand ? 1 : (brandShares[i] ?? 0.1);
+    const brng = new SeededRandom(`stock-brand-${b}-${scope}-${month}`);
+    const inventory = Math.round(totalInventory * share * brng.vary(1, 0.1));
     const depth = fmtDec(brng.vary(+stockDepth, 0.2));
     const depthTarget = fmtDec(stockDepthTarget * brng.vary(1, 0.1));
     return { brand: b, inventory, depth: +depth, depthTarget: +depthTarget };
@@ -41,29 +56,38 @@ function getOverview(month, period) {
 
   // Monthly stock run-down
   const stockRunDown = MONTH_KEYS.map((mk, i) => {
-    const mrng = new SeededRandom(`stockrun-${year}-${i}`);
+    const mrng = new SeededRandom(`stockrun-${scope}-${year}-${i}`);
     const isActual = i < m;
-    const opening = Math.round(mrng.vary(8500, 0.08));
-    const arrivals = Math.round(mrng.vary(3200 * seasonFactor(i + 1), 0.12));
-    const sales = Math.round(mrng.vary(3100 * seasonFactor(i + 1), 0.1));
+    const opening = Math.round(mrng.vary(baseInventory, 0.08));
+    const arrivals = Math.round(mrng.vary(3200 * cMul * bMul * seasonFactor(i + 1), 0.12));
+    const sales = Math.round(mrng.vary(3100 * cMul * bMul * seasonFactor(i + 1), 0.1));
     const closing = opening + arrivals - sales;
     return { month: mk, isActual, opening, arrivals, sales, closing, depth: fmtDec(closing / (sales || 1), 1) };
   });
 
-  return { month, period, kpi, brandStock, stockRunDown };
+  return { month, period, country: country || null, brand: brand || null, kpi, brandStock, stockRunDown };
 }
 
-/** GET /api/stock-logistics/logistics */
-function getLogistics(month, period) {
-  const rng = new SeededRandom(`logistics-${month}`);
+/** GET /api/stock-logistics/logistics?month=&period=&country=&brand= */
+function getLogistics(month, period, { country, brand } = {}) {
+  const scope = `${country || 'all'}-${brand || 'all'}`;
+  const rng = new SeededRandom(`logistics-${scope}-${month}-${period}`);
+  const cMul = countryShare(country);
+  const { BRAND_SHARES_ARRAY } = require('./brandsModels');
+  const brandShares = BRAND_SHARES_ARRAY;
+  const bMul = brand ? (brandShares[BRANDS.indexOf(brand)] ?? 0.1) : 1;
+  const isYTD = String(period).toUpperCase() === 'YTD';
+  const { month: m } = parseMonth(month);
+  const periodMul = isYTD ? Math.max(1, m * 0.85) : 1;
+  const totalMul = cMul * bMul * periodMul;
 
-  const factoryOrdered = Math.round(rng.vary(4200, 0.12));
+  const factoryOrdered = Math.round(rng.vary(4200 * totalMul, 0.12));
   const factoryOrderedLastYear = Math.round(rng.vary(factoryOrdered * 1.05, 0.08));
-  const inTransit = Math.round(rng.vary(2800, 0.15));
+  const inTransit = Math.round(rng.vary(2800 * cMul * bMul, 0.15));  // not period-cumulative (current snapshot)
   const inTransitAvgDays = Math.round(rng.vary(35, 0.1));
-  const atPort = Math.round(rng.vary(1200, 0.18));
+  const atPort = Math.round(rng.vary(1200 * cMul * bMul, 0.18));
   const atPortAvgDays = Math.round(rng.vary(5, 0.3));
-  const delivered = Math.round(rng.vary(3100, 0.1));
+  const delivered = Math.round(rng.vary(3100 * totalMul, 0.1));
   const deliveredTarget = Math.round(rng.vary(delivered * 1.05, 0.06));
 
   const pipeline = {
@@ -73,19 +97,21 @@ function getLogistics(month, period) {
     delivered, deliveredTarget,
   };
 
-  // Brand pipeline
-  const brandPipeline = BRANDS.slice(0, 5).map(b => {
-    const brng = new SeededRandom(`logistics-brand-${b}-${month}`);
+  // Brand pipeline — when a brand filter is set, only return that brand
+  const brandList = brand ? [brand] : BRANDS.slice(0, 5);
+  const brandPipeline = brandList.map(b => {
+    const share = brand ? 1 : 0.2;
+    const brng = new SeededRandom(`logistics-brand-${b}-${scope}-${month}`);
     return {
       brand: b,
-      ordered: Math.round(brng.vary(factoryOrdered * 0.2, 0.3)),
-      inTransit: Math.round(brng.vary(inTransit * 0.2, 0.3)),
-      atPort: Math.round(brng.vary(atPort * 0.2, 0.3)),
-      delivered: Math.round(brng.vary(delivered * 0.2, 0.3)),
+      ordered: Math.round(brng.vary(factoryOrdered * share, 0.3)),
+      inTransit: Math.round(brng.vary(inTransit * share, 0.3)),
+      atPort: Math.round(brng.vary(atPort * share, 0.3)),
+      delivered: Math.round(brng.vary(delivered * share, 0.3)),
     };
   });
 
-  return { month, period, pipeline, brandPipeline };
+  return { month, period, country: country || null, brand: brand || null, pipeline, brandPipeline };
 }
 
 /** GET /api/stock-logistics/distribution?month=&period=&country=&brand=&branch= */

@@ -13,14 +13,14 @@ function getParams(req) {
 
 // GET /api/stock-logistics/overview?month=&period=&country=&brand=
 router.get('/overview', (req, res) => {
-  const { month, period } = getParams(req);
-  res.json(data.getOverview(month, period));
+  const { month, period, country, brand } = getParams(req);
+  res.json(data.getOverview(month, period, { country, brand }));
 });
 
-// GET /api/stock-logistics/logistics?month=&period=
+// GET /api/stock-logistics/logistics?month=&period=&country=&brand=
 router.get('/logistics', (req, res) => {
-  const { month, period } = getParams(req);
-  res.json(data.getLogistics(month, period));
+  const { month, period, country, brand } = getParams(req);
+  res.json(data.getLogistics(month, period, { country, brand }));
 });
 
 // GET /api/stock-logistics/distribution?month=&period=&country=&brand=&branch=
