@@ -372,4 +372,303 @@ function getShowroomView(month, period, { showroom, country } = {}) {
   return { month, period, showrooms: result };
 }
 
-module.exports = { getOverview, getDailySales, getModelChannel, getShowroomView, getGeo };
+/**
+ * GET /api/sales-insights/showroom-sales-page?month=&period=&country=&brand=&branch=
+ * Per-brand executives leaderboard, top-selling models, and channel-target rows
+ * for the showroom-sales page. Brand defaults to Toyota when omitted.
+ */
+function getShowroomSalesPage(month, period, { country, brand, branch } = {}) {
+  const brandList = brand ? [brand] : BRANDS;
+  const isYTD = String(period).toUpperCase() === 'YTD';
+  const { month: m } = parseMonth(month);
+  const periodMul = isYTD ? Math.max(1, m * 0.9) : 1;
+  const cMul = country ? (String(country).toLowerCase() === 'uae' ? 0.6
+                       : String(country).toLowerCase() === 'ksa' ? 0.22 : 0.05) : 1;
+
+  // All showrooms (flat) for the executives' "showroom" attribution
+  const allShowrooms = [];
+  Object.keys(SHOWROOMS).forEach(cn => SHOWROOMS[cn].forEach(s => allShowrooms.push({ ...s, country: cn })));
+  const scopedShowrooms = country
+    ? allShowrooms.filter(s => s.country.toLowerCase() === String(country).toLowerCase()
+                            || COUNTRIES.find(c => c.id === country.toLowerCase())?.name === s.country)
+    : allShowrooms;
+  const branchScoped = branch
+    ? scopedShowrooms.filter(s => s.id === branch.toLowerCase() || s.name.toLowerCase().includes(branch.toLowerCase()))
+    : scopedShowrooms;
+
+  const EXEC_NAMES = ['Ahmed Al Mansoori', 'Ravi Krishnan', 'Sara Al Maktoum', 'Omar Sharif', 'Layla Al Otaiba',
+                      'Khalid Hassan', 'Fatima Al Hashmi', 'Hassan Ibrahim', 'Priya Sharma', 'Mohammed Al Ali',
+                      'Nadia Yousef', 'Ali Al Saadi', 'Reem Al Tamimi', 'Tariq Faisal', 'Aisha Rahman'];
+
+  const brands = {};
+  for (const b of brandList) {
+    const brng = new SeededRandom(`showroom-sales-${b}-${country || 'all'}-${branch || 'all'}-${month}-${period}`);
+    const baseShare = brand ? 1 : (BRAND_SHARES[BRANDS.indexOf(b)] ?? 0.1);
+
+    // Executives leaderboard — top 10 in scope
+    const executives = EXEC_NAMES.slice(0, 10).map((name, i) => {
+      const ergn = new SeededRandom(`showroom-exec-${b}-${name}-${month}-${period}`);
+      const showroom = (branchScoped[i % branchScoped.length] || allShowrooms[i % allShowrooms.length]).name;
+      const carsSold = Math.round(ergn.vary(140 * baseShare * cMul * periodMul / Math.max(1, i * 0.15 + 1), 0.18));
+      return { name, showroom, carsSold };
+    }).sort((a, b2) => b2.carsSold - a.carsSold);
+
+    // Top-selling models for this brand
+    const modelList = (BRAND_MODELS[b] || []).slice(0, 8);
+    const models = modelList.map((label, i) => {
+      const mrng = new SeededRandom(`showroom-model-${b}-${label}-${month}-${period}`);
+      const value = Math.round(mrng.vary(5500 * baseShare * cMul * periodMul * Math.pow(0.7, i), 0.12));
+      const lastYear = Math.round(mrng.vary(value * 1.05, 0.12));
+      const target = Math.round(value * mrng.vary(1.05, 0.06));
+      return {
+        label, value,
+        vsLastYear: { value: `${value >= lastYear ? '+' : ''}${(((value - lastYear) / Math.max(lastYear, 1)) * 100).toFixed(1)}%`, up: value >= lastYear },
+        vsTarget:   { value: `${value >= target   ? '+' : ''}${(((value - target)   / Math.max(target,   1)) * 100).toFixed(1)}%`, up: value >= target },
+      };
+    });
+
+    // Channel target rows
+    const channelTarget = {
+      data: CHANNELS.map((channel, i) => {
+        const crng = new SeededRandom(`showroom-channel-${b}-${channel}-${month}-${period}`);
+        const actual = Math.round(crng.vary(800 * baseShare * cMul * periodMul * (1 - i * 0.18), 0.14));
+        const target = Math.round(actual * crng.vary(1.06, 0.05));
+        return { channel, actual, target };
+      }),
+    };
+
+    brands[b] = { executives, models, channelTarget };
+  }
+
+  return { month, period, country: country || null, brand: brand || null, branch: branch || null, brands };
+}
+
+/**
+ * GET /api/sales-insights/showroom-view-page?month=&period=&country=&brand=&branch=
+ * Per-brand visitor / reservation stats with sparkline trends, leads funnel,
+ * agent leaderboards, monthly trend, and model breakdown for the showroom-view page.
+ */
+function getShowroomViewPage(month, period, { country, brand, branch } = {}) {
+  const brandList = brand ? [brand] : BRANDS.slice(0, 6);
+  const cMul = country ? (String(country).toLowerCase() === 'uae' ? 0.6
+                       : String(country).toLowerCase() === 'ksa' ? 0.22 : 0.05) : 1;
+  const isYTD = String(period).toUpperCase() === 'YTD';
+  const { month: m } = parseMonth(month);
+  const periodMul = isYTD ? Math.max(1, m * 0.9) : 1;
+
+  const trend = (rng, base, n = 30) => {
+    const out = [];
+    let v = base * 0.85;
+    for (let i = 0; i < n; i++) {
+      v = v * rng.vary(1.005, 0.04);
+      out.push(Math.round(v));
+    }
+    return out;
+  };
+
+  const stat = {};
+  const leads = {};
+  const agents = {};
+  const monthly = {};
+  const models = {};
+  const managers = {};
+
+  const AGENT_NAMES = ['Ahmed K.', 'Sara M.', 'Omar R.', 'Fatima H.', 'Khalid S.', 'Mariam B.', 'Yousef N.', 'Aisha R.',
+                       'Tariq F.', 'Layla J.', 'Bilal H.', 'Reem T.', 'Hamza Q.', 'Salma D.', 'Imran W.'];
+  const MANAGER_NAMES = ['Khalid Al Mansoori', 'Sarah Khan', 'Mohammed Al Ali', 'Priya Sharma', 'Nadia Yousef', 'Ali Hassan'];
+  const CHART_COLORS = ['#4FC3F7', '#81C784', '#FFB74D', '#F06292', '#CE93D8', '#80CBC4', '#FFAB40', '#FF8A65'];
+
+  for (const b of brandList) {
+    const baseShare = brand ? 1 : (BRAND_SHARES[BRANDS.indexOf(b)] ?? 0.1);
+    const baseFactor = baseShare * cMul * periodMul;
+
+    const visitorsRng = new SeededRandom(`sv-visitors-${b}-${country || 'all'}-${branch || 'all'}-${month}-${period}`);
+    const visitorsBase = Math.round(20000 * baseFactor * visitorsRng.vary(1, 0.08));
+    const reservationsRng = new SeededRandom(`sv-reservations-${b}-${country || 'all'}-${branch || 'all'}-${month}-${period}`);
+    const reservationsBase = Math.round(visitorsBase * reservationsRng.vary(0.18, 0.05));
+
+    const visitorsTrend = trend(visitorsRng, visitorsBase / 10, 30);
+    const reservationsTrend = trend(reservationsRng, reservationsBase / 10, 30);
+
+    stat[b] = {
+      Visitors:     { value: visitorsBase,    secondaryLabel: `Last year: ${Math.round(visitorsBase * 0.92).toLocaleString()}`,    secondaryValue: Math.round(visitorsBase * 0.92),    trend: visitorsTrend },
+      Reservations: { value: reservationsBase, secondaryLabel: `Last year: ${Math.round(reservationsBase * 0.91).toLocaleString()}`, secondaryValue: Math.round(reservationsBase * 0.91), trend: reservationsTrend },
+    };
+
+    const leadsRng = new SeededRandom(`sv-leads-${b}-${month}-${period}`);
+    const leadsValue = Math.round(5000 * baseFactor * leadsRng.vary(1, 0.08));
+    const leadsTarget = Math.round(leadsValue * leadsRng.vary(1.2, 0.08));
+    leads[b] = {
+      value: leadsValue,
+      target: leadsTarget,
+      segments: [
+        { label: 'Qualified', value: Math.round(leadsValue * leadsRng.vary(0.5, 0.05)), color: CHART_COLORS[0] },
+        { label: 'Contacted', value: Math.round(leadsValue * leadsRng.vary(0.3, 0.05)), color: CHART_COLORS[1] },
+        { label: 'Converted', value: Math.round(leadsValue * leadsRng.vary(0.2, 0.05)), color: CHART_COLORS[7] },
+      ],
+    };
+
+    agents[b] = AGENT_NAMES.slice(0, brand ? 12 : 8).map((name, i) => {
+      const argn = new SeededRandom(`sv-agent-${b}-${name}-${month}-${period}`);
+      const target = brand ? 40 : 30;
+      return {
+        name,
+        avatar: `https://i.pravatar.cc/80?img=${10 + i}`,
+        volume: Math.round(argn.vary(target * 1.1 * Math.pow(0.95, i), 0.18)),
+        target,
+      };
+    });
+
+    const MONTHS = ['Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec', 'Jan', 'Feb', 'Mar'];
+    monthly[b] = MONTHS.map((label, i) => {
+      const mrng = new SeededRandom(`sv-monthly-${b}-${label}-${month}-${period}`);
+      return { label, value: Math.round(mrng.vary(reservationsBase * 0.9 * (0.85 + i * 0.025), 0.08)) };
+    });
+
+    const modelList = (BRAND_MODELS[b] || []).slice(0, 5);
+    models[b] = modelList.map((label, i) => {
+      const mrng = new SeededRandom(`sv-model-${b}-${label}-${month}-${period}`);
+      return { label, value: Math.round(mrng.vary(reservationsBase * 0.18 * Math.pow(0.85, i), 0.12)) };
+    });
+
+    managers[b] = {
+      name: MANAGER_NAMES[BRANDS.indexOf(b) % MANAGER_NAMES.length],
+      avatar: `https://i.pravatar.cc/80?img=${50 + BRANDS.indexOf(b)}`,
+      designation: 'Showroom Manager',
+    };
+  }
+
+  return {
+    month, period, country: country || null, brand: brand || null, branch: branch || null,
+    stats: stat, leads, agents, monthly, models, managers,
+  };
+}
+
+/**
+ * GET /api/sales-insights/daily-sales-page?month=&period=&country=&brand=&branch=&model=
+ * Comprehensive shape for the daily-sales page: per-country sales, per-brand
+ * totals, per-model totals, per-showroom totals, and run-rate / order-take charts.
+ */
+function getDailySalesPage(month, period, { country, brand, branch, model } = {}) {
+  const { year, month: m } = parseMonth(month);
+  const isYTD = String(period).toUpperCase() === 'YTD';
+  const cMul = country ? (String(country).toLowerCase() === 'uae' ? 0.6
+                       : String(country).toLowerCase() === 'ksa' ? 0.22 : 0.05) : 1;
+  const bMul = brand ? (BRAND_SHARES[BRANDS.indexOf(brand)] ?? 0.1) : 1;
+  const periodMul = isYTD ? Math.max(1, m * 0.9) : 1;
+
+  // byBrand bar chart
+  const brandList = brand ? [brand] : BRANDS;
+  const byBrand = brandList.map(b => {
+    const brng = new SeededRandom(`ds-brand-${b}-${country || 'all'}-${month}-${period}`);
+    const share = brand ? 1 : (BRAND_SHARES[BRANDS.indexOf(b)] ?? 0.1);
+    const value = Math.round(brng.vary(35 * share * cMul * periodMul, 0.18));
+    const lastYear = Math.round(brng.vary(value * 1.08, 0.12));
+    const target = Math.round(value * brng.vary(1.18, 0.06));
+    return {
+      label: b, value,
+      vsLastYear: { value: `${value >= lastYear ? '+' : ''}${(((value - lastYear) / Math.max(lastYear, 1)) * 100).toFixed(1)}%`, up: value >= lastYear },
+      vsTarget:   { value: `${value >= target   ? '+' : ''}${(((value - target)   / Math.max(target,   1)) * 100).toFixed(1)}%`, up: value >= target },
+    };
+  });
+
+  // byModel — flat top-models list (or scoped to brand)
+  const modelSource = brand ? (BRAND_MODELS[brand] || []) : BRANDS.flatMap(b => (BRAND_MODELS[b] || []).slice(0, 3));
+  const byModel = modelSource.slice(0, 12).map((label, i) => {
+    const mrng = new SeededRandom(`ds-model-${label}-${country || 'all'}-${month}-${period}`);
+    const value = Math.round(mrng.vary(40 * bMul * cMul * periodMul * Math.pow(0.85, i), 0.18));
+    const lastYear = Math.round(mrng.vary(value * 1.05, 0.12));
+    const target = Math.round(value * mrng.vary(1.1, 0.06));
+    return {
+      label, value,
+      vsLastYear: { value: `${value >= lastYear ? '+' : ''}${(((value - lastYear) / Math.max(lastYear, 1)) * 100).toFixed(1)}%`, up: value >= lastYear },
+      vsTarget:   { value: `${value >= target   ? '+' : ''}${(((value - target)   / Math.max(target,   1)) * 100).toFixed(1)}%`, up: value >= target },
+    };
+  });
+
+  // byShowroom
+  const allShowrooms = [];
+  Object.keys(SHOWROOMS).forEach(cn => SHOWROOMS[cn].forEach(s => allShowrooms.push({ ...s, country: cn })));
+  const scopedShowrooms = country
+    ? allShowrooms.filter(s => s.country.toLowerCase() === String(country).toLowerCase()
+                            || COUNTRIES.find(c => c.id === country.toLowerCase())?.name === s.country)
+    : allShowrooms;
+  const branchShowrooms = branch
+    ? scopedShowrooms.filter(s => s.id === branch.toLowerCase() || s.name.toLowerCase().includes(branch.toLowerCase()))
+    : scopedShowrooms;
+  const byShowroom = branchShowrooms.map((s, i) => {
+    const srng = new SeededRandom(`ds-showroom-${s.id}-${brand || 'all'}-${month}-${period}`);
+    const value = Math.round(srng.vary(45 * bMul * Math.pow(0.85, i), 0.18));
+    const target = Math.round(value * srng.vary(1.12, 0.06));
+    const lastYear = Math.round(srng.vary(value * 1.05, 0.12));
+    return {
+      label: s.name, value,
+      vsLastYear: { value: `${value >= lastYear ? '+' : ''}${(((value - lastYear) / Math.max(lastYear, 1)) * 100).toFixed(1)}%`, up: value >= lastYear },
+      vsTarget:   { value: `${value >= target   ? '+' : ''}${(((value - target)   / Math.max(target,   1)) * 100).toFixed(1)}%`, up: value >= target },
+    };
+  });
+
+  // Per-country sales summary
+  const countryList = country
+    ? COUNTRIES.filter(c => c.id === String(country).toLowerCase() || c.name.toLowerCase() === String(country).toLowerCase())
+    : COUNTRIES;
+  const countries = {};
+  for (const c of countryList) {
+    const crng = new SeededRandom(`ds-country-${c.id}-${brand || 'all'}-${month}-${period}`);
+    const total = Math.round(crng.vary(c.baseSales * bMul * periodMul / 30, 0.12));
+    const target = Math.round(total * crng.vary(1.1, 0.06));
+    const lastYear = Math.round(crng.vary(total * 1.05, 0.12));
+    countries[c.name] = {
+      total, target, lastYear,
+      byBrand: brandList.map(b => {
+        const cbRng = new SeededRandom(`ds-country-brand-${c.id}-${b}-${month}-${period}`);
+        const share = brand ? 1 : (BRAND_SHARES[BRANDS.indexOf(b)] ?? 0.1);
+        return { label: b, value: Math.round(cbRng.vary(total * share, 0.18)) };
+      }),
+    };
+  }
+
+  // Daily run-rate + order-take (30 day windows)
+  const dailySalesRunRate = Array.from({ length: 30 }, (_, d) => {
+    const drng = new SeededRandom(`ds-rrate-${country || 'all'}-${brand || 'all'}-${month}-${d}`);
+    return { day: d + 1, actual: Math.round(drng.vary(30 * bMul * cMul, 0.2)), target: Math.round(35 * bMul * cMul) };
+  });
+  const dailyOrderTake = Array.from({ length: 30 }, (_, d) => {
+    const drng = new SeededRandom(`ds-otake-${country || 'all'}-${brand || 'all'}-${month}-${d}`);
+    return { day: d + 1, value: Math.round(drng.vary(45 * bMul * cMul, 0.22)) };
+  });
+
+  // Per-brand model + showroom drilldowns
+  const brands = {};
+  for (const b of brandList) {
+    const blist = (BRAND_MODELS[b] || []).slice(0, 6);
+    brands[b] = {
+      models: blist.map((label, i) => {
+        const mrng = new SeededRandom(`ds-brand-model-${b}-${label}-${month}-${period}`);
+        const v = Math.round(mrng.vary(50 * Math.pow(0.8, i), 0.15));
+        return {
+          label, value: v,
+          vsLastYear: { value: `${(((v - v * 1.06) / Math.max(v * 1.06, 1)) * 100).toFixed(1)}%`, up: false },
+          vsTarget:   { value: `${(((v - v * 1.05) / Math.max(v * 1.05, 1)) * 100).toFixed(1)}%`, up: false },
+        };
+      }),
+      showrooms: branchShowrooms.slice(0, 6).map((s, i) => {
+        const srng = new SeededRandom(`ds-brand-showroom-${b}-${s.id}-${month}-${period}`);
+        const v = Math.round(srng.vary(35 * Math.pow(0.85, i), 0.16));
+        return {
+          label: s.name, value: v,
+          vsLastYear: { value: `${(((v - v * 1.06) / Math.max(v * 1.06, 1)) * 100).toFixed(1)}%`, up: false },
+          vsTarget:   { value: `${(((v - v * 1.05) / Math.max(v * 1.05, 1)) * 100).toFixed(1)}%`, up: false },
+        };
+      }),
+    };
+  }
+
+  return {
+    month, period, country: country || null, brand: brand || null, branch: branch || null, model: model || null,
+    countries, brands, byBrand, byModel, byShowroom, dailyOrderTake, dailySalesRunRate,
+  };
+}
+
+module.exports = { getOverview, getDailySales, getModelChannel, getShowroomView, getGeo,
+                   getShowroomSalesPage, getShowroomViewPage, getDailySalesPage };

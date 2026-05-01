@@ -20,10 +20,15 @@ router.get('/sentiment', (req, res) => {
   res.json(data.getSentiment(month, period));
 });
 
-// GET /api/customer-intelligence/brand-comparison?month=2026-03
+// GET /api/customer-intelligence/brand-comparison?month=&period=&country=&brand=&model=
+// Returns aggregate per-brand metrics + brandModels picker map; when brand AND
+// model are passed it also returns the dimensional donut data.
 router.get('/brand-comparison', (req, res) => {
   const { month, period } = getParams(req);
-  res.json(data.getBrandComparison(month, period));
+  const country = req.query.country || undefined;
+  const brand = req.query.brand || undefined;
+  const model = req.query.model || undefined;
+  res.json(data.getBrandComparison(month, period, { country, brand, model }));
 });
 
 module.exports = router;

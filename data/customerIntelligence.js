@@ -53,23 +53,97 @@ function getSentiment(month, period) {
   return { month, period, overall, topics };
 }
 
-/** GET /api/customer-intelligence/brand-comparison */
-function getBrandComparison(month, period) {
-  const rng = new SeededRandom(`brand-comp-${month}`);
-  const { BRANDS: ALL_BRANDS } = require('./brandsModels');
+/** Per-(brand, model) demographic donut/bar dimensions used by brand-comparison.tsx */
+function buildDimensions(brand, model, month, period) {
+  const seed = `cust-dim-${brand}-${model}-${month}-${period}`;
+  const rng = new SeededRandom(seed);
+  const r = (variance, base) => Math.round(rng.vary(base, variance));
+
+  const nat = (() => {
+    const a = r(0.2, 32), b = r(0.18, 18), c = r(0.18, 14), d = r(0.18, 11), e = r(0.25, 8);
+    const sum = a + b + c + d + e;
+    return [
+      { value: a, label: 'Indian',    color: '#1192e8' },
+      { value: b, label: 'Emirati',   color: '#6929c4' },
+      { value: c, label: 'Pakistani', color: '#005d5d' },
+      { value: d, label: 'Filipino', color: '#9f1853' },
+      { value: e, label: 'Other',    color: '#fa4d56' },
+    ].map(x => ({ ...x, value: Math.round((x.value / sum) * 100) }));
+  })();
+  const total = `${r(0.2, 12)}K`;
+
+  const m = r(0.2, 60); // married %
+  const c = r(0.2, 35); // cash %
+  const buy = r(0.18, 65); // buyers %
+  const nu = r(0.2, 55); // new %
+  const fem = r(0.25, 30); // female %
+
+  return {
+    'Top 5 Nationalities': { items: nat, centerLabel: 'Total', centerValue: total, sizeScale: 0.6 },
+    'Marital Status': {
+      items: [{ value: m, label: 'Married', color: '#1192e8' }, { value: 100 - m, label: 'Single', color: '#6929c4' }],
+      centerLabel: 'Split', centerValue: '100%', sizeScale: 0.6,
+    },
+    'Cash vs Finance': {
+      items: [{ value: c, label: 'Cash', color: '#005d5d' }, { value: 100 - c, label: 'Finance', color: '#1192e8' }],
+      centerLabel: 'Method', centerValue: '100%', sizeScale: 0.6,
+    },
+    'Buyers vs Leasing': {
+      items: [{ value: buy, label: 'Buyers', color: '#6929c4' }, { value: 100 - buy, label: 'Leasing', color: '#9f1853' }],
+      centerLabel: 'Type', centerValue: '100%', sizeScale: 0.6,
+    },
+    'New vs Used': {
+      items: [{ value: nu, label: 'New', color: '#1192e8' }, { value: 100 - nu, label: 'Used', color: '#fa4d56' }],
+      centerLabel: 'Condition', centerValue: '100%', sizeScale: 0.6,
+    },
+    'Gender & Age Distribution': {
+      female: { value: `${fem}%`, count: `${r(0.3, 8)}K` },
+      male:   { value: `${100 - fem}%`, count: `${r(0.3, 18)}K` },
+      ageGroups: ['< 19', '19-25', '26-35', '36-45', '46-55', '> 55'],
+      femaleValues: [r(0.4, 5), r(0.3, 18), r(0.3, 22), r(0.3, 16), r(0.3, 12), r(0.3, 8)],
+      maleValues:   [r(0.4, 8), r(0.3, 22), r(0.3, 28), r(0.3, 18), r(0.3, 12), r(0.3, 8)],
+    },
+  };
+}
+
+/**
+ * GET /api/customer-intelligence/brand-comparison?month=&period=&country=&brand=&model=
+ *
+ * Always returns:
+ *   - brands: aggregate per-brand metrics (NPS / CSAT / sentiment / etc.)
+ *   - brandModels: brand → models[] (powers the page's brand+model picker)
+ *
+ * When both brand AND model are supplied, also returns:
+ *   - dimensions: per-(brand,model) demographic dimensions for the donut/bar
+ *     comparison charts (Top 5 Nationalities / Marital Status / etc.)
+ */
+function getBrandComparison(month, period, { country, brand, model } = {}) {
+  const { BRANDS: ALL_BRANDS, BRAND_MODELS } = require('./brandsModels');
+  const cMul = country ? (String(country).toLowerCase() === 'uae' ? 0.6
+                       : String(country).toLowerCase() === 'ksa' ? 0.22 : 0.06) : 1;
+
   const brands = ALL_BRANDS.map(b => {
-    const brng = new SeededRandom(`brand-comp-${b}-${month}`);
+    const brng = new SeededRandom(`brand-comp-${b}-${country || 'all'}-${month}-${period}`);
     return {
       brand: b,
       nps: fmtDec(brng.vary(72, 0.12)),
       csat: fmtDec(brng.vary(80, 0.08)),
       sentiment: fmtDec(brng.vary(75, 0.1)),
-      activeCustomers: Math.round(brng.vary(b === 'Toyota' ? 85000 : 25000, 0.1)),
+      activeCustomers: Math.round(brng.vary((b === 'Toyota' ? 85000 : 25000) * cMul, 0.1)),
       demographics: { avgAge: Math.round(brng.vary(38, 0.1)), malePct: Math.round(brng.vary(70, 0.08)) },
     };
   });
 
-  return { month, period, brands };
+  const brandModels = {};
+  for (const b of ALL_BRANDS) brandModels[b] = (BRAND_MODELS[b] || []).slice();
+
+  const dimensions = (brand && model) ? buildDimensions(brand, model, month, period) : null;
+
+  return {
+    month, period,
+    country: country || null, brand: brand || null, model: model || null,
+    brands, brandModels, dimensions,
+  };
 }
 
 module.exports = { getOverview, getSentiment, getBrandComparison };
