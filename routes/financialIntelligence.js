@@ -5,13 +5,14 @@ const data = require('../data/financialIntelligence');
 function getParams(req) {
   const month = req.query.month || new Date().toISOString().slice(0, 7);
   const period = req.query.period || 'MTD';
-  return { month, period };
+  const target = req.query.target || 'Budget';
+  return { month, period, target };
 }
 
-// GET /api/financial-intelligence/overview?month=2026-03&period=MTD
+// GET /api/financial-intelligence/overview?month=2026-03&period=MTD&target=Budget
 router.get('/overview', (req, res) => {
-  const { month, period } = getParams(req);
-  res.json(data.getOverview(month, period));
+  const { month, period, target } = getParams(req);
+  res.json(data.getOverview(month, period, target));
 });
 
 // GET /api/financial-intelligence/profitability?month=2026-03

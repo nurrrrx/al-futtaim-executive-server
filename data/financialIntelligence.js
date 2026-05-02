@@ -58,19 +58,24 @@ function buildActivityColumn(rng, scale) {
 }
 
 /** Build the rows array for one brand × one metric (revenue or grossMargin). */
-function buildActivityIntelRows(brand, metric, monthSeed, scaleMul = 1) {
-  const rng = new SeededRandom(`activity-${metric}-${brand}-${monthSeed}`);
+function buildActivityIntelRows(brand, metric, ctx, scaleMul = 1) {
+  const { month, period, target } = ctx;
+  const rng = new SeededRandom(`activity-${metric}-${brand}-${month}-${period}-${target}`);
   // Revenue is in tens of millions; gross margin is a fraction of revenue.
-  const baseScale = (metric === 'grossMargin' ? 2.5 : 9) * scaleMul;
+  // YTD scales the base by elapsed-months-of-year so values differ from MTD.
+  const ytdMul = period === 'YTD' ? Math.max(1, parseMonth(month).month) : 1;
+  // Target=Forecast nudges Target column up vs Budget so the comparison shifts.
+  const targetMul = target === 'Forecast' ? 1.15 : 1.08;
+  const baseScale = (metric === 'grossMargin' ? 2.5 : 9) * scaleMul * ytdMul;
   const actuals  = buildActivityColumn(rng, baseScale);
-  const target   = buildActivityColumn(rng, baseScale * 1.08);
+  const targetCol = buildActivityColumn(rng, baseScale * targetMul);
   const lastYear = buildActivityColumn(rng, baseScale * 0.92);
 
   const rows = ACTIVITY_CATEGORIES.map((name, i) => ({
     name,
     cells: [
       { v: String(actuals.values[i]),  p: actuals.pcts[i] },
-      { v: String(target.values[i]),   p: target.pcts[i] },
+      { v: String(targetCol.values[i]),   p: targetCol.pcts[i] },
       { v: String(lastYear.values[i]), p: lastYear.pcts[i] },
     ],
   }));
@@ -78,7 +83,7 @@ function buildActivityIntelRows(brand, metric, monthSeed, scaleMul = 1) {
     name: 'Corporate',
     cells: [
       { v: String(actuals.corporate),  p: '-' },
-      { v: String(target.corporate),   p: '-' },
+      { v: String(targetCol.corporate),   p: '-' },
       { v: String(lastYear.corporate), p: '-' },
     ],
   });
@@ -86,7 +91,7 @@ function buildActivityIntelRows(brand, metric, monthSeed, scaleMul = 1) {
     name: 'Total',
     cells: [
       { v: String(actuals.total),  p: '100%' },
-      { v: String(target.total),   p: '100%' },
+      { v: String(targetCol.total),   p: '100%' },
       { v: String(lastYear.total), p: '100%' },
     ],
     isTotal: true,
@@ -95,12 +100,12 @@ function buildActivityIntelRows(brand, metric, monthSeed, scaleMul = 1) {
 }
 
 /** Build the activityIntel block keyed by brand. */
-function buildActivityIntel(month) {
+function buildActivityIntel(ctx) {
   const brands = {};
   for (const brand of ACTIVITY_BRANDS) {
     brands[brand] = {
-      revenue:     { rows: buildActivityIntelRows(brand, 'revenue',     month) },
-      grossMargin: { rows: buildActivityIntelRows(brand, 'grossMargin', month) },
+      revenue:     { rows: buildActivityIntelRows(brand, 'revenue',     ctx) },
+      grossMargin: { rows: buildActivityIntelRows(brand, 'grossMargin', ctx) },
     };
   }
   // Aggregate row for clicking the "Total" line in the Brand hierarchy. We
@@ -108,8 +113,8 @@ function buildActivityIntel(month) {
   // counting parents + children) so the values look like company-wide totals.
   const aggMul = BRAND_GROUPS.length;
   brands['All Entity Groups'] = {
-    revenue:     { rows: buildActivityIntelRows('All Entity Groups', 'revenue',     month, aggMul) },
-    grossMargin: { rows: buildActivityIntelRows('All Entity Groups', 'grossMargin', month, aggMul) },
+    revenue:     { rows: buildActivityIntelRows('All Entity Groups', 'revenue',     ctx, aggMul) },
+    grossMargin: { rows: buildActivityIntelRows('All Entity Groups', 'grossMargin', ctx, aggMul) },
   };
   return { brands };
 }
@@ -124,45 +129,53 @@ function makeDelta(rng, lo = -15, hi = 25) {
 /**
  * Build the full brand hierarchy for a single metric (revenue or grossMargin).
  * Children get random values centred on (groupTotal / childCount); parents are
- * the sum of their children — so totals always reconcile.
+ * the sum of their children — so totals always reconcile. ctx (month/period/
+ * target) is folded into every seed so values change per slicer selection.
  */
-function buildBrandHierarchy(metric, monthSeed) {
+function buildBrandHierarchy(metric, ctx) {
+  const { month, period, target } = ctx;
+  const ytdMul = period === 'YTD' ? Math.max(1, parseMonth(month).month) : 1;
+  const seedKey = `${month}-${period}-${target}`;
   const hierarchy = BRAND_GROUPS.map(group => {
-    const groupTotal = metric === 'grossMargin' ? group.gmTotal : group.revTotal;
+    const groupTotal = (metric === 'grossMargin' ? group.gmTotal : group.revTotal) * ytdMul;
     const avgChild = groupTotal / group.children.length;
-    const grng = new SeededRandom(`bd-${metric}-${group.name}-${monthSeed}`);
+    const grng = new SeededRandom(`bd-${metric}-${group.name}-${seedKey}`);
     const children = group.children.map(child => {
-      const crng = new SeededRandom(`bd-${metric}-${child}-${monthSeed}`);
+      const crng = new SeededRandom(`bd-${metric}-${child}-${seedKey}`);
       const value = Math.max(1, Math.round(crng.vary(avgChild, 0.55)));
+      // Forecast target tends to be more ambitious (more reds) than Budget.
+      const tgtRange = target === 'Forecast' ? [-25, 15] : [-15, 25];
       return {
         name: child,
         value,
         vsLastYear: makeDelta(crng),
-        vsTarget: makeDelta(crng),
+        vsTarget: makeDelta(crng, tgtRange[0], tgtRange[1]),
       };
     });
     const value = children.reduce((s, c) => s + c.value, 0);
+    const tgtRange = target === 'Forecast' ? [-25, 15] : [-15, 25];
     return {
       name: group.name,
       value,
       vsLastYear: makeDelta(grng),
-      vsTarget: makeDelta(grng),
+      vsTarget: makeDelta(grng, tgtRange[0], tgtRange[1]),
       children,
     };
   });
-  const trng = new SeededRandom(`bd-${metric}-total-${monthSeed}`);
+  const trng = new SeededRandom(`bd-${metric}-total-${seedKey}`);
+  const tgtRange = target === 'Forecast' ? [-25, 15] : [-15, 25];
   const total = {
     value: hierarchy.reduce((s, g) => s + g.value, 0),
     vsLastYear: makeDelta(trng),
-    vsTarget: makeDelta(trng),
+    vsTarget: makeDelta(trng, tgtRange[0], tgtRange[1]),
   };
   return { hierarchy, total };
 }
 
 /** Build the brandDetail (Revenue + Gross Margin by Brands) block. */
-function buildBrandDetail(month) {
-  const revenue = buildBrandHierarchy('revenue', month);
-  const grossMargin = buildBrandHierarchy('grossMargin', month);
+function buildBrandDetail(ctx) {
+  const revenue = buildBrandHierarchy('revenue', ctx);
+  const grossMargin = buildBrandHierarchy('grossMargin', ctx);
   return {
     hierarchy: revenue.hierarchy,
     chartStyle: { barColor: '#3687FC', labelSuffix: 'M' },
@@ -177,47 +190,53 @@ function buildBrandDetail(month) {
 }
 
 /** GET /api/financial-intelligence/overview */
-function getOverview(month, period) {
+function getOverview(month, period = 'MTD', target = 'Budget') {
   const { year, month: m } = parseMonth(month);
   const sf = seasonFactor(m);
   const yt = yearTrend(year);
-  const rng = new SeededRandom(`fin-overview-${month}`);
+  // Seed varies by month + period + target so MTD ≠ YTD and Budget ≠ Forecast.
+  const rng = new SeededRandom(`fin-overview-${month}-${period}-${target}`);
+  // YTD scales month-magnitude up by elapsed-months-of-year. Target=Forecast
+  // pushes targets a touch higher than Budget.
+  const ytdMul = period === 'YTD' ? Math.max(1, m) : 1;
+  const targetUplift = target === 'Forecast' ? 1.07 : 1.0;
+  const ctx = { month, period, target };
 
   // Money KPIs are emitted as raw AED so the client formatter can decide how
   // to compact them (M / B). Base values are in billions for readability and
   // multiplied by 1e9 at the boundary.
   const B = 1e9;
-  const revenue = Math.round(rng.vary(2.8 * sf * yt, 0.1) * B);
-  const revenueLastYear = Math.round(rng.vary(2.8 * sf * yt * 1.06, 0.08) * B);
-  const ebit = Math.round(rng.vary(0.42 * sf * yt, 0.12) * B);
-  const ebitLastYear = Math.round(rng.vary(0.42 * sf * yt * 1.08, 0.1) * B);
+  const revenue = Math.round(rng.vary(2.8 * sf * yt * ytdMul, 0.1) * B);
+  const revenueLastYear = Math.round(rng.vary(2.8 * sf * yt * ytdMul * 1.06, 0.08) * B);
+  const ebit = Math.round(rng.vary(0.42 * sf * yt * ytdMul, 0.12) * B);
+  const ebitLastYear = Math.round(rng.vary(0.42 * sf * yt * ytdMul * 1.08, 0.1) * B);
   const ebitPct = fmtDec((ebit / revenue) * 100);
   const ebitPctLastYear = fmtDec((ebitLastYear / revenueLastYear) * 100);
   const indirectCostPct = fmtDec(rng.vary(12.5, 0.1));
   const indirectCostPctLastYear = fmtDec(rng.vary(indirectCostPct + 0.3, 0.12));
-  const freeCashFlow = Math.round(rng.vary(0.18 * sf * yt, 0.15) * B);
-  const freeCashFlowLastYear = Math.round(rng.vary(0.18 * sf * yt * 1.1, 0.12) * B);
+  const freeCashFlow = Math.round(rng.vary(0.18 * sf * yt * ytdMul, 0.15) * B);
+  const freeCashFlowLastYear = Math.round(rng.vary(0.18 * sf * yt * ytdMul * 1.1, 0.12) * B);
   const rocePct = fmtDec(rng.vary(15.2, 0.1));
   const rocePctLastYear = fmtDec(rng.vary(rocePct - 0.8, 0.12));
   const grossMargin = fmtDec(rng.vary(18.5, 0.08));
   const grossMarginLastYear = fmtDec(rng.vary(grossMargin - 0.4, 0.1));
-  const workingCapital = Math.round(rng.vary(0.65 * yt, 0.1) * B);
-  const workingCapitalLastYear = Math.round(rng.vary(0.65 * yt * 1.05, 0.08) * B);
+  const workingCapital = Math.round(rng.vary(0.65 * yt * ytdMul, 0.1) * B);
+  const workingCapitalLastYear = Math.round(rng.vary(0.65 * yt * ytdMul * 1.05, 0.08) * B);
 
   const kpi = {
-    revenue: { value: revenue, lastYear: revenueLastYear },
-    ebit: { value: ebit, lastYear: ebitLastYear },
+    revenue: { value: revenue, lastYear: revenueLastYear, target: Math.round(revenue * targetUplift) },
+    ebit: { value: ebit, lastYear: ebitLastYear, target: Math.round(ebit * targetUplift) },
     ebitPct: { value: +ebitPct, lastYear: +ebitPctLastYear },
     indirectCostPct: { value: +indirectCostPct, lastYear: +indirectCostPctLastYear },
     // Names match the client's KPI_TITLES map so cards merge correctly.
-    freeCashFlow: { value: freeCashFlow, lastYear: freeCashFlowLastYear },
+    freeCashFlow: { value: freeCashFlow, lastYear: freeCashFlowLastYear, target: Math.round(freeCashFlow * targetUplift) },
     rocePct: { value: +rocePct, lastYear: +rocePctLastYear },
     grossMargin: { value: +grossMargin, lastYear: +grossMarginLastYear },
     workingCapital: { value: workingCapital, lastYear: workingCapitalLastYear },
   };
 
   const monthlyForecast = MONTH_KEYS.map((mk, i) => {
-    const prng = new SeededRandom(`fin-plan-${year}-${i}`);
+    const prng = new SeededRandom(`fin-plan-${year}-${i}-${period}-${target}`);
     const isActual = i < m;
     return {
       month: mk,
@@ -227,10 +246,10 @@ function getOverview(month, period) {
     };
   });
 
-  const activityIntel = buildActivityIntel(month);
-  const brandDetail = buildBrandDetail(month);
+  const activityIntel = buildActivityIntel(ctx);
+  const brandDetail = buildBrandDetail(ctx);
 
-  return { month, period, kpi, monthlyForecast, activityIntel, brandDetail };
+  return { month, period, target, kpi, monthlyForecast, activityIntel, brandDetail };
 }
 
 /** GET /api/financial-intelligence/profitability */
