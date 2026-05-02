@@ -119,57 +119,101 @@ function buildActivityIntel(ctx) {
   return { brands };
 }
 
-/** Random delta tag (e.g. { value: '+8.2%', up: true }) using the supplied RNG. */
-function makeDelta(rng, lo = -15, hi = 25) {
-  const n = rng.float(lo, hi);
-  const sign = n >= 0 ? '+' : '';
-  return { value: `${sign}${n.toFixed(1)}%`, up: n >= 0 };
+/** Format a relative-pct delta string from two raw values. */
+function pctDeltaFromValues(actual, compare) {
+  if (!compare) return { value: '+0.0%', up: true };
+  const pct = ((actual - compare) / compare) * 100;
+  const sign = pct >= 0 ? '+' : '';
+  return { value: `${sign}${pct.toFixed(1)}%`, up: pct >= 0 };
 }
 
 /**
  * Build the full brand hierarchy for a single metric (revenue or grossMargin).
- * Children get random values centred on (groupTotal / childCount); parents are
- * the sum of their children — so totals always reconcile. ctx (month/period/
+ * Each child gets value, target and lastYear independently from a seed; parents
+ * are the sum of their children's value/target/lastYear; deltas are computed
+ * from those sums so they reconcile and the client can compute share-of-total
+ * percentages and ppts deltas without re-deriving anything. ctx (month/period/
  * target) is folded into every seed so values change per slicer selection.
  */
 function buildBrandHierarchy(metric, ctx) {
   const { month, period, target } = ctx;
   const ytdMul = period === 'YTD' ? Math.max(1, parseMonth(month).month) : 1;
   const seedKey = `${month}-${period}-${target}`;
+  // Forecast target tends to be more ambitious (so vsTarget skews negative).
+  const tgtRange = target === 'Forecast' ? [-25, 15] : [-15, 25];
+  const lyRange = [-15, 25];
+
   const hierarchy = BRAND_GROUPS.map(group => {
     const groupTotal = (metric === 'grossMargin' ? group.gmTotal : group.revTotal) * ytdMul;
     const avgChild = groupTotal / group.children.length;
-    const grng = new SeededRandom(`bd-${metric}-${group.name}-${seedKey}`);
     const children = group.children.map(child => {
       const crng = new SeededRandom(`bd-${metric}-${child}-${seedKey}`);
       const value = Math.max(1, Math.round(crng.vary(avgChild, 0.55)));
-      // Forecast target tends to be more ambitious (more reds) than Budget.
-      const tgtRange = target === 'Forecast' ? [-25, 15] : [-15, 25];
+      const tgtPct = crng.float(tgtRange[0], tgtRange[1]);
+      const targetVal = Math.max(1, Math.round(value / (1 + tgtPct / 100)));
+      const lyPct = crng.float(lyRange[0], lyRange[1]);
+      const lastYearVal = Math.max(1, Math.round(value / (1 + lyPct / 100)));
       return {
         name: child,
         value,
-        vsLastYear: makeDelta(crng),
-        vsTarget: makeDelta(crng, tgtRange[0], tgtRange[1]),
+        target: targetVal,
+        lastYear: lastYearVal,
+        vsLastYear: pctDeltaFromValues(value, lastYearVal),
+        vsTarget: pctDeltaFromValues(value, targetVal),
       };
     });
     const value = children.reduce((s, c) => s + c.value, 0);
-    const tgtRange = target === 'Forecast' ? [-25, 15] : [-15, 25];
+    const targetVal = children.reduce((s, c) => s + c.target, 0);
+    const lastYearVal = children.reduce((s, c) => s + c.lastYear, 0);
     return {
       name: group.name,
       value,
-      vsLastYear: makeDelta(grng),
-      vsTarget: makeDelta(grng, tgtRange[0], tgtRange[1]),
+      target: targetVal,
+      lastYear: lastYearVal,
+      vsLastYear: pctDeltaFromValues(value, lastYearVal),
+      vsTarget: pctDeltaFromValues(value, targetVal),
       children,
     };
   });
-  const trng = new SeededRandom(`bd-${metric}-total-${seedKey}`);
-  const tgtRange = target === 'Forecast' ? [-25, 15] : [-15, 25];
+  const value = hierarchy.reduce((s, g) => s + g.value, 0);
+  const targetVal = hierarchy.reduce((s, g) => s + g.target, 0);
+  const lastYearVal = hierarchy.reduce((s, g) => s + g.lastYear, 0);
   const total = {
-    value: hierarchy.reduce((s, g) => s + g.value, 0),
-    vsLastYear: makeDelta(trng),
-    vsTarget: makeDelta(trng, tgtRange[0], tgtRange[1]),
+    value,
+    target: targetVal,
+    lastYear: lastYearVal,
+    vsLastYear: pctDeltaFromValues(value, lastYearVal),
+    vsTarget: pctDeltaFromValues(value, targetVal),
   };
   return { hierarchy, total };
+}
+
+/**
+ * Build a 12-month chart for one metric. The annual total comes from the
+ * brand-hierarchy total so the chart and the table reconcile. Months before
+ * the current month are tagged 'Actuals'; months on/after are 'Forecast' so
+ * the client can colour the bars accordingly. Variance is deterministic per
+ * (metric, ctx, month-index) seed.
+ */
+function buildSalesPlanChart(metric, annualTotal, ctx) {
+  const { month, period, target } = ctx;
+  const { month: currentMonth } = parseMonth(month);
+  const seedKey = `splan-${metric}-${month}-${period}-${target}`;
+  const data = MONTH_KEYS.map((key, i) => {
+    const isActual = i + 1 < currentMonth;
+    const prng = new SeededRandom(`${seedKey}-${i}`);
+    const baseMonthly = (annualTotal / 12) * seasonFactor(i + 1);
+    const value = Math.max(1, Math.round(prng.vary(baseMonthly, 0.08)));
+    const tgtRange = target === 'Forecast' ? [-15, 10] : [-10, 15];
+    return {
+      group: isActual ? 'Actuals' : 'Forecast',
+      key,
+      value,
+      vsTarget: makeDelta(prng, tgtRange[0], tgtRange[1]),
+      vsLastYear: makeDelta(prng, -10, 20),
+    };
+  });
+  return { data };
 }
 
 /** Build the brandDetail (Revenue + Gross Margin by Brands) block. */
@@ -180,10 +224,12 @@ function buildBrandDetail(ctx) {
     hierarchy: revenue.hierarchy,
     chartStyle: { barColor: '#3687FC', labelSuffix: 'M' },
     total: revenue.total,
+    salesPlanChart: buildSalesPlanChart('revenue', revenue.total.value, ctx),
     secondaryMetric: {
       label: 'Gross Margin',
       chartStyle: { barColor: '#1f6fae', labelSuffix: 'M' },
       hierarchy: grossMargin.hierarchy,
+      salesPlanChart: buildSalesPlanChart('grossMargin', grossMargin.total.value, ctx),
     },
     secondaryTotal: grossMargin.total,
   };
